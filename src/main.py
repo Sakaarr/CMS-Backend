@@ -10,6 +10,7 @@ from src.core.middleware import RequestIDMiddleware, TimingMiddleware, TenantMid
 from src.apps.identity.router import router as auth_router
 from src.apps.tenancy.router import router as tenancy_router
 from src.apps.projects.router import router as projects_router
+from src.apps.boq.router import router as boq_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -97,6 +98,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(tenancy_router, prefix=settings.api_prefix)
 app.include_router(projects_router, prefix=settings.api_prefix)
+app.include_router(boq_router, prefix=settings.api_prefix)
 
 
 @app.get(f"{settings.api_prefix}/health")
