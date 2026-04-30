@@ -12,6 +12,10 @@ from src.core.database import Base
 from src.apps.identity.models import User, OrganizationMember, RefreshToken
 from src.apps.tenancy.models import Tenant
 from src.apps.projects.models import Project, Site, Milestone, ProjectMember
+from src.apps.boq.models import (
+    CostCode, BudgetVersion, BOQItem,
+    RateAnalysis, RateAnalysisComponent
+)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)
