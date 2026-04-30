@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel, field_validator, model_validator
 from src.apps.projects.models import (
     ProjectStatus, ProjectType, SiteStatus, MilestoneStatus
@@ -91,8 +91,8 @@ class ProjectResponse(BaseModel):
     currency: str
     progress_percentage: float
     project_manager_id: str | None
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -142,8 +142,8 @@ class SiteResponse(BaseModel):
     latitude: float | None
     longitude: float | None
     site_incharge_id: str | None
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -183,8 +183,8 @@ class MilestoneResponse(BaseModel):
     sequence: int
     is_critical: bool
     completion_percentage: float
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
