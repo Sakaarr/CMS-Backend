@@ -16,7 +16,11 @@ from src.apps.boq.models import (
     CostCode, BudgetVersion, BOQItem,
     RateAnalysis, RateAnalysisComponent
 )
-
+from src.apps.procurement.models import (
+    Vendor, RFQ, RFQItem, RFQVendor,
+    Quotation, QuotationItem,
+    PurchaseOrder, POItem, GRN, GRNItem,
+)
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)
 
