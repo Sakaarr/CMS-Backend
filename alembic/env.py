@@ -25,6 +25,10 @@ from src.apps.inventory.models import (
     Warehouse, StockItem, StockTransaction,
     MaterialRequest, MaterialRequestItem,
 )
+from src.apps.site_ops.models import (
+    DailyProgressReport, DPRWorkItem,
+    LabourAttendance, EquipmentLog,
+)
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)
 
