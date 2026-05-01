@@ -13,6 +13,7 @@ from src.apps.projects.router import router as projects_router
 from src.apps.boq.router import router as boq_router
 from src.apps.procurement.router import router as procurement_router
 from src.apps.inventory.router import router as inventory_router
+from src.apps.site_ops.router import router as site_ops_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ app.include_router(projects_router, prefix=settings.api_prefix)
 app.include_router(boq_router, prefix=settings.api_prefix)
 app.include_router(procurement_router, prefix=settings.api_prefix)
 app.include_router(inventory_router, prefix=settings.api_prefix)
+app.include_router(site_ops_router, prefix=settings.api_prefix)
 
 
 @app.get(f"{settings.api_prefix}/health")
