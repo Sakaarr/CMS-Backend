@@ -21,6 +21,10 @@ from src.apps.procurement.models import (
     Quotation, QuotationItem,
     PurchaseOrder, POItem, GRN, GRNItem,
 )
+from src.apps.inventory.models import (
+    Warehouse, StockItem, StockTransaction,
+    MaterialRequest, MaterialRequestItem,
+)
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)
 
