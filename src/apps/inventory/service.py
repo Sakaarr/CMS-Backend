@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, update
+from sqlalchemy.orm import selectinload
 from src.apps.inventory.models import (
     Warehouse, StockItem, StockTransaction, MaterialRequest,
     MaterialRequestItem, TransactionType, MaterialRequestStatus
@@ -27,10 +28,11 @@ class InventoryService:
     # ── Warehouses ────────────────────────────────────────────────
 
     async def create_warehouse(self, data: CreateWarehouseRequest) -> Warehouse:
+        code = data.code.upper()
         exists = await self.db.execute(
             select(Warehouse).where(and_(
                 Warehouse.tenant_id == self.tenant_id,
-                Warehouse.code == data.code.upper(),
+                Warehouse.code == code,
                 Warehouse.deleted_at.is_(None),
             ))
         )
@@ -38,8 +40,8 @@ class InventoryService:
             raise ConflictError(f"Warehouse code '{data.code}' already exists")
 
         wh = Warehouse(
-            **data.model_dump(),
-            code=data.code.upper(),
+            **data.model_dump(exclude={"code"}),
+            code=code,
             tenant_id=self.tenant_id,
             created_by=self.user_id,
         )
@@ -215,11 +217,18 @@ class InventoryService:
             self.db.add(item)
 
         await self.db.flush()
-        return mr
+        result = await self.db.execute(
+            select(MaterialRequest)
+            .options(selectinload(MaterialRequest.items))
+            .where(and_(MaterialRequest.id == mr.id, self._scope(MaterialRequest)))
+        )
+        return result.scalar_one()
 
     async def list_mrs(self, project_id: str) -> list[MaterialRequest]:
         result = await self.db.execute(
-            select(MaterialRequest).where(and_(
+            select(MaterialRequest)
+            .options(selectinload(MaterialRequest.items))
+            .where(and_(
                 MaterialRequest.project_id == project_id,
                 self._scope(MaterialRequest),
             )).order_by(MaterialRequest.created_at.desc())
@@ -228,7 +237,9 @@ class InventoryService:
 
     async def get_mr(self, mr_id: str) -> MaterialRequest:
         result = await self.db.execute(
-            select(MaterialRequest).where(and_(
+            select(MaterialRequest)
+            .options(selectinload(MaterialRequest.items))
+            .where(and_(
                 MaterialRequest.id == mr_id, self._scope(MaterialRequest)
             ))
         )
@@ -252,7 +263,7 @@ class InventoryService:
         mr.status = MaterialRequestStatus.APPROVED
         mr.approved_by = self.user_id
         await self.db.flush()
-        return mr
+        return await self.get_mr(mr_id)
 
     async def issue_mr(self, mr_id: str) -> MaterialRequest:
         mr = await self.get_mr(mr_id)

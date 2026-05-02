@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
+from sqlalchemy.orm import selectinload
 from src.apps.site_ops.models import (
     DailyProgressReport, DPRWorkItem, LabourAttendance, EquipmentLog
 )
@@ -77,7 +78,16 @@ class SiteOpsService:
             self.db.add(eq)
 
         await self.db.flush()
-        return dpr
+        result = await self.db.execute(
+            select(DailyProgressReport)
+            .options(
+                selectinload(DailyProgressReport.work_items),
+                selectinload(DailyProgressReport.attendance_records),
+                selectinload(DailyProgressReport.equipment_logs),
+            )
+            .where(and_(DailyProgressReport.id == dpr.id, self._scope(DailyProgressReport)))
+        )
+        return result.scalar_one()
 
     async def list_dprs(
         self, project_id: str, site_id: str | None = None,
@@ -104,10 +114,13 @@ class SiteOpsService:
 
     async def get_dpr(self, dpr_id: str) -> DailyProgressReport:
         result = await self.db.execute(
-            select(DailyProgressReport).where(and_(
-                DailyProgressReport.id == dpr_id,
-                self._scope(DailyProgressReport),
-            ))
+            select(DailyProgressReport)
+            .options(
+                selectinload(DailyProgressReport.work_items),
+                selectinload(DailyProgressReport.attendance_records),
+                selectinload(DailyProgressReport.equipment_logs),
+            )
+            .where(and_(DailyProgressReport.id == dpr_id, self._scope(DailyProgressReport)))
         )
         dpr = result.scalar_one_or_none()
         if not dpr:

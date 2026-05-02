@@ -1,6 +1,8 @@
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, update
+from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 from src.apps.procurement.models import (
     Vendor, RFQ, RFQItem, RFQVendor, Quotation, QuotationItem,
     PurchaseOrder, POItem, GRN, GRNItem,
@@ -35,10 +37,11 @@ class ProcurementService:
     # ── Vendors ───────────────────────────────────────────────────
 
     async def create_vendor(self, data: CreateVendorRequest) -> Vendor:
+        code = data.code.upper()
         exists = await self.db.execute(
             select(Vendor).where(and_(
                 Vendor.tenant_id == self.tenant_id,
-                Vendor.code == data.code.upper(),
+                Vendor.code == code,
                 Vendor.deleted_at.is_(None),
             ))
         )
@@ -46,8 +49,8 @@ class ProcurementService:
             raise ConflictError(f"Vendor code '{data.code}' already exists")
 
         vendor = Vendor(
-            **data.model_dump(),
-            code=data.code.upper(),
+            **data.model_dump(exclude={"code"}),
+            code=code,
             tenant_id=self.tenant_id,
             created_by=self.user_id,
         )
@@ -99,16 +102,17 @@ class ProcurementService:
         )
         self.db.add(rfq)
         await self.db.flush()
+        set_committed_value(rfq, "items", [])
 
         for i, item_data in enumerate(data.items):
             item = RFQItem(
                 **item_data.model_dump(),
-                rfq_id=rfq.id,
+                rfq=rfq,
                 tenant_id=self.tenant_id,
                 sort_order=i,
                 created_by=self.user_id,
             )
-            self.db.add(item)
+            rfq.items.append(item)
 
         for vendor_id in data.vendor_ids:
             rv = RFQVendor(
@@ -120,11 +124,18 @@ class ProcurementService:
             self.db.add(rv)
 
         await self.db.flush()
-        return rfq
+        result = await self.db.execute(
+            select(RFQ)
+            .options(selectinload(RFQ.items))
+            .where(and_(RFQ.id == rfq.id, self._scope(RFQ)))
+        )
+        return result.scalar_one()
 
     async def list_rfqs(self, project_id: str) -> list[RFQ]:
         result = await self.db.execute(
-            select(RFQ).where(and_(
+            select(RFQ)
+            .options(selectinload(RFQ.items))
+            .where(and_(
                 RFQ.project_id == project_id,
                 self._scope(RFQ),
             )).order_by(RFQ.created_at.desc())
@@ -133,7 +144,9 @@ class ProcurementService:
 
     async def get_rfq(self, rfq_id: str) -> RFQ:
         result = await self.db.execute(
-            select(RFQ).where(and_(RFQ.id == rfq_id, self._scope(RFQ)))
+            select(RFQ)
+            .options(selectinload(RFQ.items))
+            .where(and_(RFQ.id == rfq_id, self._scope(RFQ)))
         )
         rfq = result.scalar_one_or_none()
         if not rfq:
@@ -169,24 +182,32 @@ class ProcurementService:
         )
         self.db.add(quotation)
         await self.db.flush()
+        set_committed_value(quotation, "items", [])
 
         for item_data in data.items:
             amount = round(item_data.quantity * item_data.unit_rate, 2)
             item = QuotationItem(
                 **item_data.model_dump(),
-                quotation_id=quotation.id,
+                quotation=quotation,
                 amount=amount,
                 tenant_id=self.tenant_id,
                 created_by=self.user_id,
             )
-            self.db.add(item)
+            quotation.items.append(item)
 
         await self.db.flush()
-        return quotation
+        result = await self.db.execute(
+            select(Quotation)
+            .options(selectinload(Quotation.items))
+            .where(and_(Quotation.id == quotation.id, self._scope(Quotation)))
+        )
+        return result.scalar_one()
 
     async def list_quotations(self, rfq_id: str) -> list[Quotation]:
         result = await self.db.execute(
-            select(Quotation).where(and_(
+            select(Quotation)
+            .options(selectinload(Quotation.items))
+            .where(and_(
                 Quotation.rfq_id == rfq_id,
                 self._scope(Quotation),
             ))
@@ -195,7 +216,9 @@ class ProcurementService:
 
     async def accept_quotation(self, quotation_id: str) -> Quotation:
         result = await self.db.execute(
-            select(Quotation).where(and_(
+            select(Quotation)
+            .options(selectinload(Quotation.items))
+            .where(and_(
                 Quotation.id == quotation_id,
                 self._scope(Quotation),
             ))
@@ -233,24 +256,33 @@ class ProcurementService:
         )
         self.db.add(po)
         await self.db.flush()
+        set_committed_value(po, "items", [])
 
         for item_data in data.items:
             amount = round(item_data.quantity * item_data.unit_rate, 2)
             item = POItem(
                 **item_data.model_dump(),
-                po_id=po.id,
+                po=po,
                 amount=amount,
                 tenant_id=self.tenant_id,
                 created_by=self.user_id,
             )
-            self.db.add(item)
+            po.items.append(item)
 
         await self.db.flush()
-        return po
+
+        result = await self.db.execute(
+            select(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.items))
+            .where(and_(PurchaseOrder.id == po.id, self._scope(PurchaseOrder)))
+        )
+        return result.scalar_one()
 
     async def list_pos(self, project_id: str) -> list[PurchaseOrder]:
         result = await self.db.execute(
-            select(PurchaseOrder).where(and_(
+            select(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.items))
+            .where(and_(
                 PurchaseOrder.project_id == project_id,
                 self._scope(PurchaseOrder),
             )).order_by(PurchaseOrder.created_at.desc())
@@ -259,7 +291,9 @@ class ProcurementService:
 
     async def get_po(self, po_id: str) -> PurchaseOrder:
         result = await self.db.execute(
-            select(PurchaseOrder).where(and_(
+            select(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.items))
+            .where(and_(
                 PurchaseOrder.id == po_id,
                 self._scope(PurchaseOrder),
             ))
@@ -307,17 +341,18 @@ class ProcurementService:
         )
         self.db.add(grn)
         await self.db.flush()
+        set_committed_value(grn, "items", [])
 
         for item_data in data.items:
             amount = round(item_data.received_quantity * item_data.unit_rate, 2)
             grn_item = GRNItem(
                 **item_data.model_dump(),
-                grn_id=grn.id,
+                grn=grn,
                 amount=amount,
                 tenant_id=self.tenant_id,
                 created_by=self.user_id,
             )
-            self.db.add(grn_item)
+            grn.items.append(grn_item)
 
             # Update received quantity on PO item
             await self.db.execute(
@@ -331,7 +366,12 @@ class ProcurementService:
         # Update PO status
         await self._update_po_receipt_status(data.po_id)
         await self.db.flush()
-        return grn
+        result = await self.db.execute(
+            select(GRN)
+            .options(selectinload(GRN.items))
+            .where(and_(GRN.id == grn.id, self._scope(GRN)))
+        )
+        return result.scalar_one()
 
     async def _update_po_receipt_status(self, po_id: str) -> None:
         result = await self.db.execute(
@@ -359,7 +399,9 @@ class ProcurementService:
 
     async def list_grns(self, project_id: str) -> list[GRN]:
         result = await self.db.execute(
-            select(GRN).where(and_(
+            select(GRN)
+            .options(selectinload(GRN.items))
+            .where(and_(
                 GRN.project_id == project_id,
                 self._scope(GRN),
             )).order_by(GRN.created_at.desc())
@@ -368,7 +410,9 @@ class ProcurementService:
 
     async def confirm_grn(self, grn_id: str) -> GRN:
         result = await self.db.execute(
-            select(GRN).where(and_(GRN.id == grn_id, self._scope(GRN)))
+            select(GRN)
+            .options(selectinload(GRN.items))
+            .where(and_(GRN.id == grn_id, self._scope(GRN)))
         )
         grn = result.scalar_one_or_none()
         if not grn:

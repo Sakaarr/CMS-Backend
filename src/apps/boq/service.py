@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, update
+from sqlalchemy.orm import selectinload
 from src.apps.boq.models import (
     CostCode, BudgetVersion, BOQItem, RateAnalysis, RateAnalysisComponent,
     BudgetVersionStatus, BOQItemStatus
@@ -340,11 +341,22 @@ class BOQService:
         ra.overhead_amount = overhead
         ra.unit_rate = unit_rate
         await self.db.flush()
-        return ra
+        result = await self.db.execute(
+            select(RateAnalysis)
+            .options(selectinload(RateAnalysis.components))
+            .where(and_(
+                RateAnalysis.id == ra.id,
+                RateAnalysis.tenant_id == self.tenant_id,
+                RateAnalysis.deleted_at.is_(None),
+            ))
+        )
+        return result.scalar_one()
 
     async def list_rate_analyses(self, cost_code_id: str) -> list[RateAnalysis]:
         result = await self.db.execute(
-            select(RateAnalysis).where(
+            select(RateAnalysis)
+            .options(selectinload(RateAnalysis.components))
+            .where(
                 and_(
                     RateAnalysis.cost_code_id == cost_code_id,
                     RateAnalysis.tenant_id == self.tenant_id,
