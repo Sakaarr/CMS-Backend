@@ -42,3 +42,4 @@ async def client(db):
     ) as ac:
         yield ac
     app.dependency_overrides.clear()
+
