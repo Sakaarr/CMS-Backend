@@ -29,6 +29,10 @@ from src.apps.site_ops.models import (
     DailyProgressReport, DPRWorkItem,
     LabourAttendance, EquipmentLog,
 )
+from src.apps.finance.models import (
+    Invoice, InvoiceLineItem, Payment,
+    Expense, ChangeOrder, PaymentCertificate,
+)
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)
 
