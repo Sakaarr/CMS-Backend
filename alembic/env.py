@@ -33,6 +33,10 @@ from src.apps.finance.models import (
     Invoice, InvoiceLineItem, Payment,
     Expense, ChangeOrder, PaymentCertificate,
 )
+from src.apps.quality.models import (
+    Inspection, ChecklistItem, NCR,
+    SafetyIncident, PunchListItem,
+)
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)
 
