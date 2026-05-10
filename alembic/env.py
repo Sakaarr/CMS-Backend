@@ -37,6 +37,7 @@ from src.apps.quality.models import (
     Inspection, ChecklistItem, NCR,
     SafetyIncident, PunchListItem,
 )
+from src.apps.documents.models import Document, DocumentApproval, DocumentRevision
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)
 
