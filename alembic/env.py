@@ -9,7 +9,7 @@ from src.core.config import settings
 from src.core.database import Base
 
 # Import all models so Alembic sees them
-from src.apps.identity.models import User, OrganizationMember, RefreshToken
+from src.apps.identity.models import User, OrganizationMember, RefreshToken, UserPermission
 from src.apps.tenancy.models import Tenant
 from src.apps.projects.models import Project, Site, Milestone, ProjectMember
 from src.apps.boq.models import (

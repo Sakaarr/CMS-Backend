@@ -44,6 +44,9 @@ class User(BaseModel):
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         back_populates="user", lazy="select", cascade="all, delete-orphan"
     )
+    must_change_password: Mapped[bool] = mapped_column(
+    Boolean, default=False, nullable=False
+    )
 
 class OrganizationMember(TenantScopedModel):
     """
@@ -78,3 +81,28 @@ class RefreshToken(BaseModel):
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")
+
+
+class UserPermission(TenantScopedModel):
+    """
+    Module-level permissions for a user within a tenant.
+    One row per user per tenant — stores which modules they can access.
+    """
+    __tablename__ = "user_permissions"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Each module is a boolean flag
+    can_projects: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    can_boq: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_procurement: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_inventory: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_site_ops: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_finance: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_quality: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_documents: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Relationships
+    user: Mapped["User"] = relationship(lazy="select")

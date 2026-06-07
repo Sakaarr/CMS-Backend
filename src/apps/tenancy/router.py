@@ -9,6 +9,10 @@ from src.apps.tenancy.schemas import (
 )
 from src.apps.identity.dependencies import CurrentUser, SuperAdmin
 from src.shared.response import APIResponse, PaginatedResponse, success_response, paginated_response
+from src.apps.identity.schemas import CreateTenantAdminRequest
+from src.apps.identity.service import UserManagementService
+from pydantic import BaseModel, field_validator, EmailStr
+import re
 
 router = APIRouter(prefix="/tenants", tags=["Tenancy"])
 
@@ -96,4 +100,76 @@ async def activate_tenant(
     return success_response(
         data=TenantResponse.model_validate(tenant),
         message="Tenant activated",
+    )
+
+from src.apps.identity.schemas import CreateTenantAdminRequest
+from src.apps.identity.service import UserManagementService
+
+class CreateTenantWithAdminRequest(BaseModel):
+    # All existing tenant fields
+    name: str
+    slug: str
+    email: EmailStr
+    phone: str | None = None
+    address: str | None = None
+    country: str = "NP"
+    currency: str = "NPR"
+    timezone: str = "Asia/Kathmandu"
+    pan_number: str | None = None
+    vat_number: str | None = None
+    # Admin fields
+    admin_full_name: str
+    admin_email: EmailStr
+    admin_phone: str | None = None
+
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v: str) -> str:
+        v = v.lower().strip()
+        if not re.match(r"^[a-z0-9-]+$", v):
+            raise ValueError("Slug can only contain lowercase letters, numbers, hyphens")
+        if len(v) < 3 or len(v) > 50:
+            raise ValueError("Slug must be 3-50 characters")
+        return v
+
+
+@router.post("", response_model=APIResponse[TenantResponse], status_code=201)
+async def create_tenant(
+    data: CreateTenantWithAdminRequest,
+    current_user: SuperAdmin,
+    db: AsyncSession = Depends(get_db),
+):
+    
+
+    tenant_service = TenantService(db)
+
+    # Create the tenant first
+    from src.apps.tenancy.schemas import CreateTenantRequest
+    tenant_data = CreateTenantRequest(
+        name=data.name, slug=data.slug, email=data.email,
+        phone=data.phone, address=data.address, country=data.country,
+        currency=data.currency, timezone=data.timezone,
+        pan_number=data.pan_number, vat_number=data.vat_number,
+    )
+    tenant = await tenant_service.create(tenant_data, created_by=current_user.id)
+
+    # Create the admin user for this tenant
+    user_svc = UserManagementService(
+        db=db, tenant_id=tenant.id, acting_user_id=current_user.id
+    )
+    admin_data = CreateTenantAdminRequest(
+        email=data.admin_email,
+        full_name=data.admin_full_name,
+        phone=data.admin_phone,
+    )
+    await user_svc.create_tenant_admin(
+        tenant_id=tenant.id,
+        tenant_name=tenant.name,
+        tenant_slug=tenant.slug,
+        data=admin_data,
+    )
+
+    return success_response(
+        data=TenantResponse.model_validate(tenant),
+        message=f"Tenant created. Admin credentials sent to {data.admin_email}",
     )

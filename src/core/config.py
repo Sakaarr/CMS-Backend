@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
+    # Email (SMTP)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_use_tls: bool = True
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "noreply@cmsplatform.com"
+    smtp_from_name: str = "CMS Platform"
+
+    # App URL (for email links)
+    dashboard_url: str = "http://localhost:3000"
 
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]

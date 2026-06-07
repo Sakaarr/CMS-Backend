@@ -90,3 +90,105 @@ class UpdateProfileRequest(BaseModel):
     phone: str | None = None
     avatar_url: str | None = None
 
+
+
+class CreateTenantAdminRequest(BaseModel):
+    """Used by super admin when creating a tenant — creates the admin user too."""
+    email: EmailStr
+    full_name: str
+    phone: str | None = None
+
+
+class CreateUserRequest(BaseModel):
+    """Used by tenant admin to create users within their org."""
+    email: EmailStr
+    full_name: str
+    phone: str | None = None
+    role: UserRole = UserRole.VIEWER
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if len(v.strip()) < 2:
+            raise ValueError("Full name must be at least 2 characters")
+        return v.strip()
+
+
+class UpdateUserRequest(BaseModel):
+    full_name: str | None = None
+    phone: str | None = None
+    role: UserRole | None = None
+    is_active: bool | None = None
+
+
+class UserPermissionSchema(BaseModel):
+    can_projects: bool = True
+    can_boq: bool = False
+    can_procurement: bool = False
+    can_inventory: bool = False
+    can_site_ops: bool = False
+    can_finance: bool = False
+    can_quality: bool = False
+    can_documents: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class UserWithPermissionsResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    phone: str | None
+    is_active: bool
+    is_superadmin: bool
+    status: UserStatus
+    must_change_password: bool
+    role: UserRole | None = None
+    permissions: UserPermissionSchema | None = None
+
+    model_config = {"from_attributes": True}
+
+
+# Default permissions per role
+ROLE_DEFAULT_PERMISSIONS: dict[UserRole, dict] = {
+    UserRole.SUPER_ADMIN: {
+        "can_projects": True, "can_boq": True, "can_procurement": True,
+        "can_inventory": True, "can_site_ops": True, "can_finance": True,
+        "can_quality": True, "can_documents": True,
+    },
+    UserRole.COMPANY_ADMIN: {
+        "can_projects": True, "can_boq": True, "can_procurement": True,
+        "can_inventory": True, "can_site_ops": True, "can_finance": True,
+        "can_quality": True, "can_documents": True,
+    },
+    UserRole.PROJECT_MANAGER: {
+        "can_projects": True, "can_boq": True, "can_procurement": True,
+        "can_inventory": True, "can_site_ops": True, "can_finance": False,
+        "can_quality": True, "can_documents": True,
+    },
+    UserRole.SITE_ENGINEER: {
+        "can_projects": True, "can_boq": False, "can_procurement": False,
+        "can_inventory": True, "can_site_ops": True, "can_finance": False,
+        "can_quality": True, "can_documents": True,
+    },
+    UserRole.FINANCE: {
+        "can_projects": True, "can_boq": True, "can_procurement": True,
+        "can_inventory": False, "can_site_ops": False, "can_finance": True,
+        "can_quality": False, "can_documents": True,
+    },
+    UserRole.PROCUREMENT: {
+        "can_projects": True, "can_boq": False, "can_procurement": True,
+        "can_inventory": True, "can_site_ops": False, "can_finance": False,
+        "can_quality": False, "can_documents": True,
+    },
+    UserRole.QA_OFFICER: {
+        "can_projects": True, "can_boq": False, "can_procurement": False,
+        "can_inventory": False, "can_site_ops": True, "can_finance": False,
+        "can_quality": True, "can_documents": True,
+    },
+    UserRole.VIEWER: {
+        "can_projects": True, "can_boq": False, "can_procurement": False,
+        "can_inventory": False, "can_site_ops": False, "can_finance": False,
+        "can_quality": False, "can_documents": False,
+    },
+}
