@@ -7,7 +7,7 @@ from src.core.config import settings
 from src.core.database import create_all_tables
 from src.core.exceptions import AppException
 from src.core.middleware import RequestIDMiddleware, TimingMiddleware, TenantMiddleware
-from src.apps.identity.router import router as auth_router
+from src.apps.identity.router import router as auth_router, user_router
 from src.apps.tenancy.router import router as tenancy_router
 from src.apps.projects.router import router as projects_router
 from src.apps.boq.router import router as boq_router
@@ -111,6 +111,8 @@ app.include_router(site_ops_router, prefix=settings.api_prefix)
 app.include_router(finance_router, prefix=settings.api_prefix)
 app.include_router(quality_router, prefix=settings.api_prefix)
 app.include_router(documents_router, prefix=settings.api_prefix)
+app.include_router(auth_router, prefix=settings.api_prefix)
+app.include_router(user_router, prefix=settings.api_prefix)
 
 
 @app.get(f"{settings.api_prefix}/health")
