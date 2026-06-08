@@ -14,12 +14,14 @@ from src.apps.tenancy.models import Tenant
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.shared.response import APIResponse, success_response
+from src.core.dependencies import require_module
 
 router = APIRouter(tags=["BOQ & Estimation"])
 
 
 async def get_boq_service(
     current_user: User = Depends(get_current_user),
+    _: User = Depends(require_module("boq")),
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> BOQService:

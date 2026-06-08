@@ -54,7 +54,7 @@ class UserResponse(BaseModel):
     is_superadmin: bool
     status: UserStatus
     avatar_url: str | None
-
+    must_change_password: bool = False 
     model_config = {"from_attributes": True}
 
 

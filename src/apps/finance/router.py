@@ -16,12 +16,14 @@ from src.apps.finance.schemas import (
     CreatePaymentCertRequest, PaymentCertResponse,
 )
 from src.shared.response import APIResponse, PaginatedResponse, success_response, paginated_response
+from src.core.dependencies import require_module
 
 router = APIRouter(tags=["Finance"])
 
 
 async def get_svc(
     current_user: User = Depends(get_current_user),
+    _: User = Depends(require_module("finance")), 
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> FinanceService:

@@ -1,217 +1,47 @@
-import hashlib
-from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
-from src.apps.identity.models import User, RefreshToken, UserRole, OrganizationMember
-from src.apps.identity.schemas import (
-    RegisterRequest,
-    LoginRequest,
-    TokenResponse,
-    UserResponse,
-)
-from src.core.security import (
-    hash_password,
-    verify_password,
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-)
-from src.core.exceptions import (
-    ConflictError,
-    UnauthorizedError,
-    NotFoundError,
-    ValidationError,
-)
-from src.core.config import settings
 import secrets
 import string
-from src.apps.identity.models import UserPermission, OrganizationMember
+import logging
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_
+from src.apps.identity.models import (
+    User, OrganizationMember, UserPermission, UserRole, UserStatus
+)
 from src.apps.identity.schemas import (
     CreateUserRequest, UpdateUserRequest,
     UserPermissionSchema, ROLE_DEFAULT_PERMISSIONS,
     CreateTenantAdminRequest,
 )
+from src.core.security import hash_password
+from src.core.exceptions import (
+    NotFoundError, ConflictError, ValidationError
+)
 from src.core.email import send_user_welcome, send_tenant_admin_welcome
+from src.core.config import settings
 
-
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
-class AuthService:
-    def __init__(self, db: AsyncSession):
-        self.db = db
-
-    async def register(self, data: RegisterRequest) -> User:
-        # Check email uniqueness
-        existing = await self.db.execute(
-            select(User).where(User.email == data.email, User.deleted_at.is_(None))
-        )
-        if existing.scalar_one_or_none():
-            raise ConflictError("Email already registered")
-
-        user = User(
-            email=data.email,
-            hashed_password=hash_password(data.password),
-            full_name=data.full_name,
-            phone=data.phone,
-        )
-        self.db.add(user)
-        await self.db.flush()
-        return user
-
-    async def login(
-        self, data: LoginRequest, device_info: str | None = None, ip: str | None = None
-    ) -> TokenResponse:
-        # Fetch user
-        result = await self.db.execute(
-            select(User).where(
-                and_(User.email == data.email, User.deleted_at.is_(None))
-            )
-        )
-        user = result.scalar_one_or_none()
-
-        if not user or not verify_password(data.password, user.hashed_password):
-            raise UnauthorizedError("Invalid email or password")
-
-        if not user.is_active:
-            raise UnauthorizedError("Account is inactive")
-
-        # Build token extra claims
-        extra = {"is_superadmin": user.is_superadmin}
-
-        access_token = create_access_token(user.id, extra_data=extra)
-        refresh_token = create_refresh_token(user.id)
-
-        # Persist refresh token hash
-        token_record = RefreshToken(
-            user_id=user.id,
-            token_hash=_hash_token(refresh_token),
-            device_info=device_info,
-            ip_address=ip,
-        )
-        self.db.add(token_record)
-        await self.db.flush()
-
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_in=settings.jwt_access_token_expire_minutes * 60,
-        )
-
-    async def refresh(self, refresh_token: str) -> TokenResponse:
-        try:
-            payload = decode_token(refresh_token)
-        except ValueError:
-            raise UnauthorizedError("Invalid refresh token")
-
-        if payload.get("type") != "refresh":
-            raise UnauthorizedError("Invalid token type")
-
-        token_hash = _hash_token(refresh_token)
-        result = await self.db.execute(
-            select(RefreshToken).where(
-                and_(
-                    RefreshToken.token_hash == token_hash,
-                    RefreshToken.is_revoked.is_(False),
-                )
-            )
-        )
-        token_record = result.scalar_one_or_none()
-        if not token_record:
-            raise UnauthorizedError("Refresh token revoked or not found")
-
-        # Rotate: revoke old, issue new
-        token_record.is_revoked = True
-
-        user_id = payload["sub"]
-        result = await self.db.execute(
-            select(User).where(
-                and_(User.id == user_id, User.deleted_at.is_(None))
-            )
-        )
-        user = result.scalar_one_or_none()
-        if not user or not user.is_active:
-            raise UnauthorizedError("User not found or inactive")
-
-        extra = {"is_superadmin": user.is_superadmin}
-        new_access = create_access_token(user.id, extra_data=extra)
-        new_refresh = create_refresh_token(user.id)
-
-        new_record = RefreshToken(
-            user_id=user.id,
-            token_hash=_hash_token(new_refresh),
-            device_info=token_record.device_info,
-            ip_address=token_record.ip_address,
-        )
-        self.db.add(new_record)
-        await self.db.flush()
-
-        return TokenResponse(
-            access_token=new_access,
-            refresh_token=new_refresh,
-            expires_in=settings.jwt_access_token_expire_minutes * 60,
-        )
-
-    async def logout(self, refresh_token: str) -> None:
-        token_hash = _hash_token(refresh_token)
-        result = await self.db.execute(
-            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
-        )
-        record = result.scalar_one_or_none()
-        if record:
-            record.is_revoked = True
-        await self.db.flush()
-
-    async def get_user_by_id(self, user_id: str) -> User:
-        result = await self.db.execute(
-            select(User).where(
-                and_(User.id == user_id, User.deleted_at.is_(None))
-            )
-        )
-        user = result.scalar_one_or_none()
-        if not user:
-            raise NotFoundError("User")
-        return user
-
-    async def change_password(
-        self, user_id: str, current_password: str, new_password: str
-    ) -> None:
-        user = await self.get_user_by_id(user_id)
-        if not verify_password(current_password, user.hashed_password):
-            raise ValidationError("Current password is incorrect")
-        user.hashed_password = hash_password(new_password)
-        user.must_change_password = False  # ← clear the flag
-        user.updated_by = user_id
-        await self.db.flush()
-
-    async def update_profile(self, user_id: str, data: dict) -> User:
-        user = await self.get_user_by_id(user_id)
-        for key, value in data.items():
-            if value is not None:
-                setattr(user, key, value)
-        await self.db.flush()
-        return user
+logger = logging.getLogger(__name__)
 
 
 def generate_temp_password(length: int = 12) -> str:
-    """Generate a secure readable temporary password."""
-    alphabet = string.ascii_letters + string.digits
-    # Ensure at least one uppercase, one digit
-    password = (
-        secrets.choice(string.ascii_uppercase) +
-        secrets.choice(string.digits) +
-        "".join(secrets.choice(alphabet) for _ in range(length - 2))
+    """Generates a secure, readable temporary password."""
+    upper = secrets.choice(string.ascii_uppercase)
+    digit = secrets.choice(string.digits)
+    rest_length = max(length - 2, 6)
+    rest = "".join(
+        secrets.choice(string.ascii_letters + string.digits)
+        for _ in range(rest_length)
     )
-    # Shuffle
-    chars = list(password)
+    chars = list(upper + digit + rest)
     secrets.SystemRandom().shuffle(chars)
-    print(chars)
     return "".join(chars)
 
 
 class UserManagementService:
-    def __init__(self, db: AsyncSession, tenant_id: str, acting_user_id: str):
+    def __init__(
+        self,
+        db: AsyncSession,
+        tenant_id: str,
+        acting_user_id: str,
+    ):
         self.db = db
         self.tenant_id = tenant_id
         self.acting_user_id = acting_user_id
@@ -223,22 +53,18 @@ class UserManagementService:
         tenant_id: str,
         tenant_name: str,
         tenant_slug: str,
-        data: "CreateTenantAdminRequest",
-    ) -> tuple["User", str]:
-        """
-        Creates a user + marks them as company_admin for the tenant.
-        Returns (user, temp_password).
-        """
-        from src.apps.identity.models import User, OrganizationMember, UserRole
+        data: CreateTenantAdminRequest,
+    ) -> tuple[User, str]:
+        """Creates company_admin user for a tenant. Returns (user, temp_password)."""
 
-        # Check email not already used
+        # Check email uniqueness
         existing = await self.db.execute(
             select(User).where(
                 and_(User.email == data.email, User.deleted_at.is_(None))
             )
         )
         if existing.scalar_one_or_none():
-            raise ConflictError("Email already registered")
+            raise ConflictError(f"Email '{data.email}' is already registered")
 
         temp_password = generate_temp_password()
 
@@ -253,7 +79,7 @@ class UserManagementService:
         self.db.add(user)
         await self.db.flush()
 
-        # Create org membership as company_admin
+        # Org membership — company admin, is_owner=True
         member = OrganizationMember(
             user_id=user.id,
             tenant_id=tenant_id,
@@ -264,17 +90,18 @@ class UserManagementService:
         )
         self.db.add(member)
 
-        # Create full permissions for company admin
+        # Full permissions for company admin
+        default_perms = ROLE_DEFAULT_PERMISSIONS[UserRole.COMPANY_ADMIN]
         perms = UserPermission(
             user_id=user.id,
             tenant_id=tenant_id,
             created_by=self.acting_user_id,
-            **ROLE_DEFAULT_PERMISSIONS[UserRole.COMPANY_ADMIN],
+            **default_perms,
         )
         self.db.add(perms)
         await self.db.flush()
 
-        # Send welcome email
+        # Send welcome email (logs to console in dev)
         send_tenant_admin_welcome(
             to=data.email,
             full_name=data.full_name,
@@ -284,6 +111,9 @@ class UserManagementService:
             dashboard_url=settings.dashboard_url,
         )
 
+        logger.info(
+            f"Tenant admin created: {data.email} for tenant {tenant_slug}"
+        )
         return user, temp_password
 
     # ── Create user (called by tenant admin) ─────────────────────
@@ -292,18 +122,17 @@ class UserManagementService:
         self,
         tenant_slug: str,
         tenant_name: str,
-        data: "CreateUserRequest",
-    ) -> tuple["User", str]:
-        from src.apps.identity.models import User, OrganizationMember
+        data: CreateUserRequest,
+    ) -> tuple[User, str]:
+        """Creates a user within the tenant. Returns (user, temp_password)."""
 
-        # Check email uniqueness globally
         existing = await self.db.execute(
             select(User).where(
                 and_(User.email == data.email, User.deleted_at.is_(None))
             )
         )
         if existing.scalar_one_or_none():
-            raise ConflictError("Email already registered")
+            raise ConflictError(f"Email '{data.email}' is already registered")
 
         temp_password = generate_temp_password()
 
@@ -330,7 +159,9 @@ class UserManagementService:
         self.db.add(member)
 
         # Default permissions based on role
-        default_perms = ROLE_DEFAULT_PERMISSIONS.get(data.role, {})
+        default_perms = ROLE_DEFAULT_PERMISSIONS.get(
+            data.role, ROLE_DEFAULT_PERMISSIONS[UserRole.VIEWER]
+        )
         perms = UserPermission(
             user_id=user.id,
             tenant_id=self.tenant_id,
@@ -351,6 +182,10 @@ class UserManagementService:
             dashboard_url=settings.dashboard_url,
         )
 
+        logger.info(
+            f"User created: {data.email} role={data.role.value} "
+            f"tenant={tenant_slug}"
+        )
         return user, temp_password
 
     # ── List users in tenant ──────────────────────────────────────
@@ -377,9 +212,8 @@ class UserManagementService:
             .order_by(OrganizationMember.created_at.asc())
         )
         rows = result.all()
-        users = []
-        for member, user, perms in rows:
-            users.append({
+        return [
+            {
                 "id": user.id,
                 "email": user.email,
                 "full_name": user.full_name,
@@ -391,8 +225,9 @@ class UserManagementService:
                 "role": member.role,
                 "is_owner": member.is_owner,
                 "permissions": perms,
-            })
-        return users
+            }
+            for member, user, perms in rows
+        ]
 
     # ── Get single user ───────────────────────────────────────────
 
@@ -437,8 +272,7 @@ class UserManagementService:
 
     # ── Update user ───────────────────────────────────────────────
 
-    async def update_user(self, user_id: str, data: "UpdateUserRequest") -> dict:
-        # Update User model fields
+    async def update_user(self, user_id: str, data: UpdateUserRequest) -> dict:
         user_result = await self.db.execute(
             select(User).where(
                 and_(User.id == user_id, User.deleted_at.is_(None))
@@ -454,8 +288,8 @@ class UserManagementService:
             user.phone = data.phone
         if data.is_active is not None:
             user.is_active = data.is_active
+        user.updated_by = self.acting_user_id
 
-        # Update role in membership
         if data.role is not None:
             member_result = await self.db.execute(
                 select(OrganizationMember).where(
@@ -476,8 +310,8 @@ class UserManagementService:
     # ── Update permissions ────────────────────────────────────────
 
     async def update_permissions(
-        self, user_id: str, data: "UserPermissionSchema"
-    ) -> "UserPermission":
+        self, user_id: str, data: UserPermissionSchema
+    ) -> UserPermission:
         result = await self.db.execute(
             select(UserPermission).where(
                 and_(
@@ -508,6 +342,9 @@ class UserManagementService:
     # ── Deactivate user ───────────────────────────────────────────
 
     async def deactivate_user(self, user_id: str) -> None:
+        if user_id == self.acting_user_id:
+            raise ValidationError("You cannot deactivate your own account")
+
         user_result = await self.db.execute(
             select(User).where(
                 and_(User.id == user_id, User.deleted_at.is_(None))
@@ -516,20 +353,17 @@ class UserManagementService:
         user = user_result.scalar_one_or_none()
         if not user:
             raise NotFoundError("User")
-
-        # Prevent deactivating yourself
-        if user_id == self.acting_user_id:
-            raise ValidationError("You cannot deactivate your own account")
-
         user.is_active = False
+        user.updated_by = self.acting_user_id
         await self.db.flush()
 
-    # ── Reset password (resend credentials) ──────────────────────
+    # ── Reset password ────────────────────────────────────────────
 
     async def reset_user_password(
         self, user_id: str, tenant_slug: str, tenant_name: str
     ) -> None:
         user_data = await self.get_user(user_id)
+
         user_result = await self.db.execute(
             select(User).where(User.id == user_id)
         )
@@ -538,6 +372,7 @@ class UserManagementService:
         temp_password = generate_temp_password()
         user.hashed_password = hash_password(temp_password)
         user.must_change_password = True
+        user.updated_by = self.acting_user_id
         await self.db.flush()
 
         send_user_welcome(
@@ -550,9 +385,9 @@ class UserManagementService:
             dashboard_url=settings.dashboard_url,
         )
 
-    # ── Get permissions for current user ─────────────────────────
+    # ── Get my permissions ────────────────────────────────────────
 
-    async def get_my_permissions(self, user_id: str) -> "UserPermission | None":
+    async def get_my_permissions(self, user_id: str) -> UserPermission | None:
         result = await self.db.execute(
             select(UserPermission).where(
                 and_(
