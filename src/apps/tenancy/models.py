@@ -47,8 +47,9 @@ class Tenant(BaseModel):
     vat_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Branding / white-label
-    logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     primary_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    secondary_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
 
     # Limits (per plan)
     max_projects: Mapped[int] = mapped_column(Integer, default=3, nullable=False)

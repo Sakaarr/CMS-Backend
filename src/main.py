@@ -7,6 +7,8 @@ from src.core.config import settings
 from src.core.database import create_all_tables
 from src.core.exceptions import AppException
 from src.core.middleware import RequestIDMiddleware, TimingMiddleware, TenantMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 from src.apps.identity.router import router as auth_router, user_router
 from src.apps.tenancy.router import router as tenancy_router
 from src.apps.projects.router import router as projects_router
@@ -64,6 +66,8 @@ app = FastAPI(
     openapi_url=f"{settings.api_prefix}/openapi.json",
     lifespan=lifespan,
 )
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Middleware (order matters — outermost runs first)
 app.add_middleware(RequestIDMiddleware)

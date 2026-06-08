@@ -58,3 +58,30 @@ class TenantResponse(BaseModel):
     is_active: bool
 
     model_config = {"from_attributes": True}
+class UpdateBrandingRequest(BaseModel):
+    primary_color: str | None = None
+    secondary_color: str | None = None
+
+    @field_validator("primary_color", "secondary_color", mode="before")
+    @classmethod
+    def validate_hex(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        import re
+        if not re.match(r"^#[0-9A-Fa-f]{6}$", v):
+            raise ValueError("Color must be a valid hex code like #2563eb")
+        return v.lower()
+
+
+class TenantBrandingResponse(BaseModel):
+    id: str
+    name: str
+    slug: str
+    logo_url: str | None
+    primary_color: str | None
+    secondary_color: str | None
+    currency: str
+    country: str
+    plan: str
+
+    model_config = {"from_attributes": True}
