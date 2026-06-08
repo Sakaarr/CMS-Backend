@@ -18,7 +18,16 @@ class Settings(BaseSettings):
     app_debug: bool= True
     secret_key: str
     api_prefix: str = "/api/v1"
-
+    # Storage — S3/MinIO (leave blank to use local disk in dev)
+    s3_bucket: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = "ap-south-1"
+    s3_endpoint_url: str = ""   # MinIO: http://localhost:9000
+    s3_public_url: str = ""     # CDN or MinIO public URL
+    # API base URL (used to construct local file URLs)
+    api_base_url: str = "http://localhost:8000"
+    
     #Database 
 
     database_url: str

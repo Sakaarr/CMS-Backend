@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.core.exceptions import ForbiddenError
@@ -13,6 +13,7 @@ from src.apps.identity.schemas import (
 from src.apps.identity.dependencies import CurrentUser, SuperAdmin, get_current_user
 from src.apps.identity.models import User, OrganizationMember, UserRole
 from src.shared.response import APIResponse, success_response
+from src.core.storage import save_file
 
 # ── Auth router ───────────────────────────────────────────────────
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -377,4 +378,24 @@ async def reset_password(
     )
     return success_response(
         message="Password reset. New credentials sent to user's email"
+    )
+
+@user_router.post("/me/avatar", response_model=APIResponse[UserResponse])
+async def upload_avatar(
+    avatar: UploadFile,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        url = await save_file(avatar, subfolder=f"avatars/{current_user.id}")
+    except ValueError as e:
+        from src.core.exceptions import ValidationError
+        raise ValidationError(str(e))
+
+    current_user.avatar_url = url
+    await db.flush()
+    await db.commit()
+    return success_response(
+        data=UserResponse.model_validate(current_user),
+        message="Avatar updated",
     )

@@ -1,5 +1,5 @@
 import re
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, File, UploadFile, Form, Request
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
@@ -10,6 +10,11 @@ from src.shared.response import (
     APIResponse, PaginatedResponse,
     success_response, paginated_response,
 )
+from src.core.storage import save_file
+from src.apps.tenancy.schemas import UpdateBrandingRequest, TenantBrandingResponse
+from src.apps.identity.dependencies import get_current_user
+from src.apps.identity.models import User
+from src.core.exceptions import ForbiddenError
 
 router = APIRouter(prefix="/tenants", tags=["Tenancy"])
 
@@ -183,4 +188,118 @@ async def activate_tenant(
     return success_response(
         data=TenantResponse.model_validate(tenant),
         message="Tenant activated",
+    )
+
+@router.get("/my/branding", response_model=APIResponse[TenantBrandingResponse])
+async def get_my_branding(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns branding for the current tenant.
+    Used by all users (login page, sidebar logo, etc.)
+    No admin required — all members can read branding.
+    """
+    from src.apps.tenancy.service import TenantService
+    tenant_slug = getattr(request.state, "tenant_slug", None)
+    if not tenant_slug:
+        return success_response(data=None)
+    service = TenantService(db)
+    tenant = await service.get_by_slug(tenant_slug)
+    return success_response(data=TenantBrandingResponse.model_validate(tenant))
+
+
+@router.post("/my/branding/logo", response_model=APIResponse[TenantBrandingResponse])
+async def upload_logo(
+    request: Request,
+    logo: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload tenant logo. Company admin only."""
+    from src.apps.tenancy.service import TenantService
+    from src.apps.identity.models import OrganizationMember, UserRole
+    from sqlalchemy import select, and_
+
+    tenant_slug = getattr(request.state, "tenant_slug", None)
+    if not tenant_slug:
+        raise ForbiddenError("Tenant context required")
+
+    service = TenantService(db)
+    tenant = await service.get_by_slug(tenant_slug)
+
+    # Only company_admin or superadmin
+    if not current_user.is_superadmin:
+        member_result = await db.execute(
+            select(OrganizationMember).where(
+                and_(
+                    OrganizationMember.user_id == current_user.id,
+                    OrganizationMember.tenant_id == tenant.id,
+                    OrganizationMember.role == UserRole.COMPANY_ADMIN,
+                    OrganizationMember.deleted_at.is_(None),
+                )
+            )
+        )
+        if not member_result.scalar_one_or_none():
+            raise ForbiddenError("Company admin access required")
+
+    try:
+        url = await save_file(logo, subfolder=f"tenants/{tenant.id}/logo")
+    except ValueError as e:
+        from src.core.exceptions import ValidationError
+        raise ValidationError(str(e))
+
+    tenant.logo_url = url
+    await db.flush()
+    await db.commit()
+    return success_response(
+        data=TenantBrandingResponse.model_validate(tenant),
+        message="Logo uploaded successfully",
+    )
+
+
+@router.patch("/my/branding/colors", response_model=APIResponse[TenantBrandingResponse])
+async def update_colors(
+    request: Request,
+    data: UpdateBrandingRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update brand colors. Company admin only."""
+    from src.apps.tenancy.service import TenantService
+    from src.apps.identity.models import OrganizationMember, UserRole
+    from sqlalchemy import select, and_
+
+    tenant_slug = getattr(request.state, "tenant_slug", None)
+    if not tenant_slug:
+        raise ForbiddenError("Tenant context required")
+
+    service = TenantService(db)
+    tenant = await service.get_by_slug(tenant_slug)
+
+    if not current_user.is_superadmin:
+        member_result = await db.execute(
+            select(OrganizationMember).where(
+                and_(
+                    OrganizationMember.user_id == current_user.id,
+                    OrganizationMember.tenant_id == tenant.id,
+                    OrganizationMember.role == UserRole.COMPANY_ADMIN,
+                    OrganizationMember.deleted_at.is_(None),
+                )
+            )
+        )
+        if not member_result.scalar_one_or_none():
+            raise ForbiddenError("Company admin access required")
+
+    if data.primary_color is not None:
+        tenant.primary_color = data.primary_color
+    if data.secondary_color is not None:
+        tenant.secondary_color = data.secondary_color
+
+    await db.flush()
+    await db.commit()
+    return success_response(
+        data=TenantBrandingResponse.model_validate(tenant),
+        message="Brand colors updated",
     )
