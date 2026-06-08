@@ -37,7 +37,14 @@ async def login(
     service = AuthService(db)
     device_info = request.headers.get("User-Agent")
     ip = request.client.host if request.client else None
-    tokens = await service.login(data, device_info=device_info, ip=ip)
+    # Pass tenant slug from header/state so login validates membership
+    tenant_slug = getattr(request.state, "tenant_slug", None)
+    tokens = await service.login(
+        data,
+        device_info=device_info,
+        ip=ip,
+        tenant_slug=tenant_slug,
+    )
     return success_response(data=tokens, message="Login successful")
 
 

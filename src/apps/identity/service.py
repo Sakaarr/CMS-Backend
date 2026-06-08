@@ -61,9 +61,15 @@ class AuthService:
         return user
 
     async def login(
-        self, data: LoginRequest, device_info: str | None = None, ip: str | None = None
+        self,
+        data: LoginRequest,
+        device_info: str | None = None,
+        ip: str | None = None,
+        tenant_slug: str | None = None,  # ← new param
     ) -> TokenResponse:
-        # Fetch user
+        
+
+        # Fetch user by email
         result = await self.db.execute(
             select(User).where(
                 and_(User.email == data.email, User.deleted_at.is_(None))
@@ -77,13 +83,54 @@ class AuthService:
         if not user.is_active:
             raise UnauthorizedError("Account is inactive")
 
-        # Build token extra claims
-        extra = {"is_superadmin": user.is_superadmin}
+        # Superadmin can log in without a tenant slug
+        if not user.is_superadmin:
+            if not tenant_slug:
+                raise UnauthorizedError(
+                    "Organisation slug is required"
+                )
 
+            # Validate that user is actually a member of this tenant
+            from src.apps.tenancy.models import Tenant
+            from src.apps.identity.models import OrganizationMember
+
+            tenant_result = await self.db.execute(
+                select(Tenant).where(
+                    and_(
+                        Tenant.slug == tenant_slug,
+                        Tenant.is_active.is_(True),
+                        Tenant.deleted_at.is_(None),
+                    )
+                )
+            )
+            tenant = tenant_result.scalar_one_or_none()
+            if not tenant:
+                raise UnauthorizedError(
+                    "Organisation not found or inactive"
+                )
+
+            member_result = await self.db.execute(
+                select(OrganizationMember).where(
+                    and_(
+                        OrganizationMember.user_id == user.id,
+                        OrganizationMember.tenant_id == tenant.id,
+                        OrganizationMember.deleted_at.is_(None),
+                    )
+                )
+            )
+            member = member_result.scalar_one_or_none()
+            if not member:
+                raise UnauthorizedError(
+                    "You are not a member of this organisation"
+                )
+
+        extra = {
+            "is_superadmin": user.is_superadmin,
+            "must_change_password": user.must_change_password,
+        }
         access_token = create_access_token(user.id, extra_data=extra)
         refresh_token = create_refresh_token(user.id)
 
-        # Persist refresh token hash
         token_record = RefreshToken(
             user_id=user.id,
             token_hash=_hash_token(refresh_token),
