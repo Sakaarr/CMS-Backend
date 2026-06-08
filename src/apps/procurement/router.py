@@ -14,12 +14,14 @@ from src.apps.procurement.schemas import (
     CreateGRNRequest, GRNResponse,
 )
 from src.shared.response import APIResponse, success_response
+from src.core.dependencies import require_module
 
 router = APIRouter(tags=["Procurement"])
 
 
 async def get_svc(
     current_user: User = Depends(get_current_user),
+    _: User = Depends(require_module("procurement")),
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> ProcurementService:

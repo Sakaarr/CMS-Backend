@@ -12,12 +12,14 @@ from src.apps.inventory.schemas import (
     CreateMRRequest, MRResponse,
 )
 from src.shared.response import APIResponse, success_response
+from src.core.dependencies import require_module
 
 router = APIRouter(tags=["Inventory"])
 
 
 async def get_svc(
     current_user: User = Depends(get_current_user),
+    _: User = Depends(require_module("inventory")),
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> InventoryService:

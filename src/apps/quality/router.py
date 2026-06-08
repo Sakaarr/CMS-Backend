@@ -15,12 +15,14 @@ from src.apps.quality.schemas import (
     CreatePunchItemRequest, UpdatePunchItemRequest, PunchItemResponse,
 )
 from src.shared.response import APIResponse, PaginatedResponse, success_response, paginated_response
+from src.core.dependencies import require_module
 
 router = APIRouter(tags=["Quality & Safety"])
 
 
 async def get_svc(
     current_user: User = Depends(get_current_user),
+    _: User = Depends(require_module("quality")),
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> QualityService:
