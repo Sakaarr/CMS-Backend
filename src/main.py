@@ -19,6 +19,7 @@ from src.apps.site_ops.router import router as site_ops_router
 from src.apps.finance.router import router as finance_router
 from src.apps.quality.router import router as quality_router
 from src.apps.documents.router import router as documents_router
+from src.apps.approvals.router import router as approvals_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ app.include_router(site_ops_router, prefix=settings.api_prefix)
 app.include_router(finance_router, prefix=settings.api_prefix)
 app.include_router(quality_router, prefix=settings.api_prefix)
 app.include_router(documents_router, prefix=settings.api_prefix)
+app.include_router(approvals_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(user_router, prefix=settings.api_prefix)
 
