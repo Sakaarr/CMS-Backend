@@ -9,7 +9,7 @@ from src.apps.inventory.service import InventoryService
 from src.apps.inventory.schemas import (
     CreateWarehouseRequest, WarehouseResponse,
     StockAdjustmentRequest, StockItemResponse, StockTransactionResponse,
-    CreateMRRequest, MRResponse, IssueMaterialRequest, RejectMRRequest,
+    CreateMRRequest, MRResponse, ApproveMRRequest, IssueMaterialRequest, RejectMRRequest,
 )
 from src.shared.response import APIResponse, success_response
 from src.core.dependencies import require_module
@@ -92,8 +92,8 @@ async def submit_mr(mr_id: str, svc: InventoryService = Depends(get_svc)):
 
 
 @router.post("/material-requests/{mr_id}/approve", response_model=APIResponse[MRResponse])
-async def approve_mr(mr_id: str, approved_items: list[dict], svc: InventoryService = Depends(get_svc)):
-    mr = await svc.approve_mr(mr_id, approved_items)
+async def approve_mr(mr_id: str, data: ApproveMRRequest, svc: InventoryService = Depends(get_svc)):
+    mr = await svc.approve_mr(mr_id, [m.model_dump() for m in data.items])
     return success_response(data=MRResponse.model_validate(mr), message="MR approved")
 
 

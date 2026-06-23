@@ -108,8 +108,22 @@ class MRResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ApproveMRItem(BaseModel):
+    item_id: str
+    approved_quantity: float
+
+
+class ApproveMRRequest(BaseModel):
+    items: list[ApproveMRItem]
+
+
+class IssueMRItem(BaseModel):
+    mr_item_id: str
+    issued_quantity: float
+
+
 class IssueMaterialRequest(BaseModel):
-    items: list[dict]  # [{mr_item_id, issued_quantity}]
+    items: list[IssueMRItem]
 
 
 class RejectMRRequest(BaseModel):
