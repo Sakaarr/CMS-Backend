@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.core.exceptions import ForbiddenError
+from src.core.rate_limit import limiter
 from src.apps.identity.service import AuthService
 from src.apps.identity.user_management import UserManagementService
 from src.apps.identity.schemas import (
@@ -30,6 +31,7 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=APIResponse[TokenResponse])
+@limiter.limit("10/minute")
 async def login(
     data: LoginRequest,
     request: Request,
