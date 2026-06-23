@@ -36,6 +36,7 @@ class POStatus(str, enum.Enum):
     DRAFT = "draft"
     PENDING_APPROVAL = "pending_approval"
     APPROVED = "approved"
+    REJECTED = "rejected"
     SENT = "sent"
     PARTIALLY_RECEIVED = "partially_received"
     FULLY_RECEIVED = "fully_received"

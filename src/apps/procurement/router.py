@@ -12,6 +12,7 @@ from src.apps.procurement.schemas import (
     CreateQuotationRequest, QuotationResponse,
     CreatePORequest, POResponse,
     CreateGRNRequest, GRNResponse,
+    RejectPORequest,
 )
 from src.shared.response import APIResponse, success_response
 from src.core.dependencies import require_module
@@ -124,6 +125,12 @@ async def submit_po(po_id: str, svc: ProcurementService = Depends(get_svc)):
 async def approve_po(po_id: str, svc: ProcurementService = Depends(get_svc)):
     po = await svc.approve_po(po_id)
     return success_response(data=POResponse.model_validate(po), message="PO approved")
+
+
+@router.post("/purchase-orders/{po_id}/reject", response_model=APIResponse[POResponse])
+async def reject_po(po_id: str, data: RejectPORequest, svc: ProcurementService = Depends(get_svc)):
+    po = await svc.reject_po(po_id, reason=data.reason)
+    return success_response(data=POResponse.model_validate(po), message="PO rejected")
 
 
 @router.get("/projects/{project_id}/procurement-stats", response_model=APIResponse[dict])

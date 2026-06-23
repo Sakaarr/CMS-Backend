@@ -14,6 +14,7 @@ from src.apps.finance.schemas import (
     CreateExpenseRequest, ExpenseResponse,
     CreateChangeOrderRequest, ChangeOrderResponse,
     CreatePaymentCertRequest, PaymentCertResponse,
+    RejectInvoiceRequest, RejectExpenseRequest, RejectChangeOrderRequest,
 )
 from src.shared.response import APIResponse, PaginatedResponse, success_response, paginated_response
 from src.core.dependencies import require_module
@@ -79,6 +80,12 @@ async def submit_invoice(invoice_id: str, svc: FinanceService = Depends(get_svc)
 async def approve_invoice(invoice_id: str, svc: FinanceService = Depends(get_svc)):
     inv = await svc.approve_invoice(invoice_id)
     return success_response(data=InvoiceResponse.model_validate(inv), message="Invoice approved")
+
+
+@router.post("/invoices/{invoice_id}/reject", response_model=APIResponse[InvoiceResponse])
+async def reject_invoice(invoice_id: str, data: RejectInvoiceRequest, svc: FinanceService = Depends(get_svc)):
+    inv = await svc.reject_invoice(invoice_id, reason=data.reason)
+    return success_response(data=InvoiceResponse.model_validate(inv), message="Invoice rejected")
 
 
 @router.post("/invoices/{invoice_id}/payments",
@@ -149,6 +156,12 @@ async def approve_expense(expense_id: str, svc: FinanceService = Depends(get_svc
     return success_response(data=ExpenseResponse.model_validate(exp), message="Expense approved")
 
 
+@router.post("/expenses/{expense_id}/reject", response_model=APIResponse[ExpenseResponse])
+async def reject_expense(expense_id: str, data: RejectExpenseRequest, svc: FinanceService = Depends(get_svc)):
+    exp = await svc.reject_expense(expense_id, reason=data.reason)
+    return success_response(data=ExpenseResponse.model_validate(exp), message="Expense rejected")
+
+
 # ── Change Orders ─────────────────────────────────────────────────
 
 @router.post("/projects/{project_id}/change-orders",
@@ -178,6 +191,12 @@ async def submit_change_order(co_id: str, svc: FinanceService = Depends(get_svc)
 async def approve_change_order(co_id: str, svc: FinanceService = Depends(get_svc)):
     co = await svc.approve_change_order(co_id)
     return success_response(data=ChangeOrderResponse.model_validate(co), message="Change order approved")
+
+
+@router.post("/change-orders/{co_id}/reject", response_model=APIResponse[ChangeOrderResponse])
+async def reject_change_order(co_id: str, data: RejectChangeOrderRequest, svc: FinanceService = Depends(get_svc)):
+    co = await svc.reject_change_order(co_id, reason=data.reason)
+    return success_response(data=ChangeOrderResponse.model_validate(co), message="Change order rejected")
 
 
 # ── Payment Certificates ──────────────────────────────────────────

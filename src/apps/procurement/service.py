@@ -13,9 +13,17 @@ from src.apps.procurement.schemas import (
     CreateRFQRequest, CreateQuotationRequest,
     CreatePORequest, CreateGRNRequest,
 )
+from src.apps.projects.models import Project
 from src.core.exceptions import NotFoundError, ConflictError, ValidationError
-from src.core.notifications import NotificationService
+from src.core.email_templates import (
+    approval_requested_html, item_approved_html, item_rejected_html,
+    notify_permission_holders, notify_user_by_id,
+)
+from src.apps.identity.models import User
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 def _next_number(prefix: str) -> str:
@@ -312,21 +320,19 @@ class ProcurementService:
         po.approved_by = self.user_id
         await self.db.flush()
 
-        if po.created_by:
-            notif = NotificationService(self.db, self.tenant_id)
-            await notif.notify_approved(
-                module="procurement",
-                item_type="purchase_order",
-                item_id=po.id,
-                item_number=po.po_number,
-                created_by=po.created_by,
-                approved_by=self.user_id,
-                project_id=po.project_id,
-                extra_meta={
-                    "Grand Total": f"{po.grand_total:,.2f}",
-                    "Currency": po.currency or "NPR",
-                },
-            )
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == po.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            approver_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "An approver"
+            html = item_approved_html("Purchase Order", po.po_number, proj_name, approver_name)
+            await notify_user_by_id(self.db, po.created_by, f"PO {po.po_number} Approved", html)
+        except Exception as e:
+            logger.warning(f"Failed to send PO approval email: {e}")
 
         return po
 
@@ -337,19 +343,42 @@ class ProcurementService:
         po.status = POStatus.PENDING_APPROVAL
         await self.db.flush()
 
-        notif = NotificationService(self.db, self.tenant_id)
-        await notif.notify_submitted(
-            module="procurement",
-            item_type="purchase_order",
-            item_id=po.id,
-            item_number=po.po_number,
-            submitted_by=self.user_id,
-            project_id=po.project_id,
-            extra_meta={
-                "Grand Total": f"{po.grand_total:,.2f}",
-                "Currency": po.currency or "NPR",
-            },
-        )
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == po.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            submitter_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "A user"
+            html = approval_requested_html("Purchase Order", po.po_number, proj_name, submitter_name)
+            await notify_permission_holders(
+                self.db, self.tenant_id, "can_finance",
+                self.user_id, f"PO {po.po_number} Awaiting Approval", html,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send PO submission email: {e}")
+
+        return po
+
+    async def reject_po(self, po_id: str, reason: str | None = None) -> PurchaseOrder:
+        po = await self.get_po(po_id)
+        if po.status != POStatus.PENDING_APPROVAL:
+            raise ValidationError("PO must be in pending_approval status to reject")
+        po.status = POStatus.REJECTED
+        await self.db.flush()
+
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == po.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            html = item_rejected_html("Purchase Order", po.po_number, proj_name, reason)
+            await notify_user_by_id(self.db, po.created_by, f"PO {po.po_number} Rejected", html)
+        except Exception as e:
+            logger.warning(f"Failed to send PO rejection email: {e}")
 
         return po
 

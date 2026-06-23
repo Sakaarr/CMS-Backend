@@ -8,8 +8,8 @@ from src.apps.projects.dependencies import get_current_tenant
 from src.apps.inventory.service import InventoryService
 from src.apps.inventory.schemas import (
     CreateWarehouseRequest, WarehouseResponse,
-    StockItemResponse, StockAdjustmentRequest, StockTransactionResponse,
-    CreateMRRequest, MRResponse,
+    StockAdjustmentRequest, StockItemResponse, StockTransactionResponse,
+    CreateMRRequest, MRResponse, IssueMaterialRequest, RejectMRRequest,
 )
 from src.shared.response import APIResponse, success_response
 from src.core.dependencies import require_module
@@ -95,6 +95,12 @@ async def submit_mr(mr_id: str, svc: InventoryService = Depends(get_svc)):
 async def approve_mr(mr_id: str, approved_items: list[dict], svc: InventoryService = Depends(get_svc)):
     mr = await svc.approve_mr(mr_id, approved_items)
     return success_response(data=MRResponse.model_validate(mr), message="MR approved")
+
+
+@router.post("/material-requests/{mr_id}/reject", response_model=APIResponse[MRResponse])
+async def reject_mr(mr_id: str, data: RejectMRRequest, svc: InventoryService = Depends(get_svc)):
+    mr = await svc.reject_mr(mr_id, reason=data.reason)
+    return success_response(data=MRResponse.model_validate(mr), message="MR rejected")
 
 
 @router.post("/material-requests/{mr_id}/issue", response_model=APIResponse[MRResponse])

@@ -110,3 +110,7 @@ class MRResponse(BaseModel):
 
 class IssueMaterialRequest(BaseModel):
     items: list[dict]  # [{mr_item_id, issued_quantity}]
+
+
+class RejectMRRequest(BaseModel):
+    reason: str | None = None

@@ -206,6 +206,10 @@ class GRNItemRequest(BaseModel):
     remarks: str | None = None
 
 
+class RejectPORequest(BaseModel):
+    reason: str | None = None
+
+
 class CreateGRNRequest(BaseModel):
     po_id: str
     received_date: date
