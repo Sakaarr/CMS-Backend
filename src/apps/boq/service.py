@@ -12,6 +12,7 @@ from src.apps.boq.schemas import (
     CreateRateAnalysisRequest,
 )
 from src.core.exceptions import NotFoundError, ConflictError, ValidationError
+from src.core.notifications import NotificationService
 
 
 class BOQService:
@@ -163,6 +164,24 @@ class BOQService:
         bv.status = BudgetVersionStatus.APPROVED
         bv.approved_by = self.user_id
         await self.db.flush()
+
+        if bv.created_by:
+            notif = NotificationService(self.db, self.tenant_id)
+            await notif.notify_approved(
+                module="boq",
+                item_type="budget_version",
+                item_id=bv.id,
+                item_number=f"{bv.name} v{bv.version_number}",
+                created_by=bv.created_by,
+                approved_by=self.user_id,
+                project_id=bv.project_id,
+                extra_meta={
+                    "Version": str(bv.version_number),
+                    "Grand Total": f"{bv.grand_total:,.2f}" if bv.grand_total else "N/A",
+                    "Currency": bv.currency or "NPR",
+                },
+            )
+
         return bv
 
     # ── BOQ Items ─────────────────────────────────────────────────
@@ -182,6 +201,9 @@ class BOQService:
             tenant_id=self.tenant_id,
             amount=amount,
             created_by=self.user_id,
+            actual_quantity=0.0,
+            actual_amount=0.0,
+            status=BOQItemStatus.DRAFT,
         )
         self.db.add(item)
         await self.db.flush()

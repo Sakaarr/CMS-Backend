@@ -6,6 +6,7 @@ from src.apps.site_ops.models import (
 )
 from src.apps.site_ops.schemas import CreateDPRRequest, UpdateDPRRequest
 from src.core.exceptions import NotFoundError, ConflictError, ValidationError
+from src.core.notifications import NotificationService
 
 
 class SiteOpsService:
@@ -134,6 +135,15 @@ class SiteOpsService:
         dpr.is_submitted = True
         dpr.submitted_by = self.user_id
         await self.db.flush()
+
+        notif = NotificationService(self.db, self.tenant_id)
+        await notif.notify_dpr_submitted(
+            item_number=str(dpr.id)[:8],
+            report_date=str(dpr.report_date),
+            submitted_by=self.user_id,
+            project_id=dpr.project_id,
+        )
+
         return dpr
 
     async def update_dpr(self, dpr_id: str, data: UpdateDPRRequest) -> DailyProgressReport:

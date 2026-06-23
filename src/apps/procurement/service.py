@@ -14,6 +14,7 @@ from src.apps.procurement.schemas import (
     CreatePORequest, CreateGRNRequest,
 )
 from src.core.exceptions import NotFoundError, ConflictError, ValidationError
+from src.core.notifications import NotificationService
 import uuid
 
 
@@ -310,6 +311,23 @@ class ProcurementService:
         po.status = POStatus.APPROVED
         po.approved_by = self.user_id
         await self.db.flush()
+
+        if po.created_by:
+            notif = NotificationService(self.db, self.tenant_id)
+            await notif.notify_approved(
+                module="procurement",
+                item_type="purchase_order",
+                item_id=po.id,
+                item_number=po.po_number,
+                created_by=po.created_by,
+                approved_by=self.user_id,
+                project_id=po.project_id,
+                extra_meta={
+                    "Grand Total": f"{po.grand_total:,.2f}",
+                    "Currency": po.currency or "NPR",
+                },
+            )
+
         return po
 
     async def submit_po(self, po_id: str) -> PurchaseOrder:
@@ -318,6 +336,21 @@ class ProcurementService:
             raise ValidationError("Only draft POs can be submitted for approval")
         po.status = POStatus.PENDING_APPROVAL
         await self.db.flush()
+
+        notif = NotificationService(self.db, self.tenant_id)
+        await notif.notify_submitted(
+            module="procurement",
+            item_type="purchase_order",
+            item_id=po.id,
+            item_number=po.po_number,
+            submitted_by=self.user_id,
+            project_id=po.project_id,
+            extra_meta={
+                "Grand Total": f"{po.grand_total:,.2f}",
+                "Currency": po.currency or "NPR",
+            },
+        )
+
         return po
 
     # ── GRN ───────────────────────────────────────────────────────

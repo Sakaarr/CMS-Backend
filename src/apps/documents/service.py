@@ -10,6 +10,8 @@ from src.apps.documents.schemas import (
     AddRevisionRequest, ApprovalActionRequest, AddApproverRequest,
 )
 from src.core.exceptions import NotFoundError, ValidationError, ConflictError
+from src.core.notifications import NotificationService
+from src.apps.identity.models import User
 import uuid
 
 
@@ -125,7 +127,34 @@ class DocumentService:
             raise ValidationError("Only draft documents can be submitted for review")
         doc.status = DocumentStatus.UNDER_REVIEW
         await self.db.flush()
-        return await self.get_document(document_id)
+
+        doc = await self.get_document(document_id)
+        submitter = await self._get_user(self.user_id)
+        submitter_name = submitter.full_name if submitter else "Unknown"
+
+        notif = NotificationService(self.db, self.tenant_id)
+        for approval in doc.approvals:
+            if approval.status == ApprovalStatus.PENDING:
+                approver_result = await self.db.execute(
+                    select(User).where(User.id == approval.approver_id)
+                )
+                approver = approver_result.scalar_one_or_none()
+                if approver:
+                    await notif.notify_submitted_to_approver(
+                        module="documents",
+                        item_type="document",
+                        item_id=doc.id,
+                        item_number=doc.document_number,
+                        submitted_by_name=submitter_name,
+                        approver=approver,
+                        project_id=doc.project_id,
+                        extra_meta={
+                            "Title": doc.title,
+                            "Document Number": doc.document_number,
+                        },
+                    )
+
+        return doc
 
     async def add_revision(
         self, document_id: str, data: AddRevisionRequest
@@ -212,7 +241,44 @@ class DocumentService:
             doc.status = DocumentStatus.REJECTED
 
         await self.db.flush()
+
+        if data.status == ApprovalStatus.APPROVED:
+            notif = NotificationService(self.db, self.tenant_id)
+            if doc.created_by:
+                await notif.notify_approved(
+                    module="documents",
+                    item_type="document",
+                    item_id=doc.id,
+                    item_number=doc.document_number,
+                    created_by=doc.created_by,
+                    approved_by=self.user_id,
+                    project_id=doc.project_id,
+                    extra_meta={"Title": doc.title},
+                )
+        elif data.status == ApprovalStatus.REJECTED:
+            notif = NotificationService(self.db, self.tenant_id)
+            if doc.created_by:
+                await notif.notify_rejected(
+                    module="documents",
+                    item_type="document",
+                    item_id=doc.id,
+                    item_number=doc.document_number,
+                    created_by=doc.created_by,
+                    rejected_by=self.user_id,
+                    project_id=doc.project_id,
+                    extra_meta={"Title": doc.title},
+                )
+
         return approval
+
+    async def _get_user(self, user_id: str):
+        result = await self.db.execute(
+            select(User).where(and_(
+                User.id == user_id,
+                User.deleted_at.is_(None),
+            ))
+        )
+        return result.scalar_one_or_none()
 
     # ── Summary ───────────────────────────────────────────────────
 

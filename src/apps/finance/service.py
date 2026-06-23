@@ -16,6 +16,7 @@ from src.apps.finance.schemas import (
 from src.core.exceptions import (
     NotFoundError, ConflictError, ValidationError
 )
+from src.core.notifications import NotificationService
 import uuid
 
 
@@ -157,6 +158,23 @@ class FinanceService:
         inv.status = InvoiceStatus.APPROVED
         inv.approved_by = self.user_id
         await self.db.flush()
+
+        if inv.created_by:
+            notif = NotificationService(self.db, self.tenant_id)
+            await notif.notify_approved(
+                module="finance",
+                item_type="invoice",
+                item_id=inv.id,
+                item_number=inv.invoice_number,
+                created_by=inv.created_by,
+                approved_by=self.user_id,
+                project_id=inv.project_id,
+                extra_meta={
+                    "Grand Total": f"{inv.grand_total:,.2f}",
+                    "Currency": inv.currency or "NPR",
+                },
+            )
+
         return inv
 
     async def submit_invoice(self, invoice_id: str) -> Invoice:
@@ -165,6 +183,21 @@ class FinanceService:
             raise ValidationError("Only draft invoices can be submitted")
         inv.status = InvoiceStatus.SUBMITTED
         await self.db.flush()
+
+        notif = NotificationService(self.db, self.tenant_id)
+        await notif.notify_submitted(
+            module="finance",
+            item_type="invoice",
+            item_id=inv.id,
+            item_number=inv.invoice_number,
+            submitted_by=self.user_id,
+            project_id=inv.project_id,
+            extra_meta={
+                "Grand Total": f"{inv.grand_total:,.2f}",
+                "Currency": inv.currency or "NPR",
+            },
+        )
+
         return inv
 
     async def record_payment(
@@ -303,6 +336,22 @@ class FinanceService:
         exp.status = ExpenseStatus.APPROVED
         exp.approved_by = self.user_id
         await self.db.flush()
+
+        if exp.created_by:
+            notif = NotificationService(self.db, self.tenant_id)
+            await notif.notify_approved(
+                module="finance",
+                item_type="expense",
+                item_id=exp.id,
+                item_number=exp.expense_number,
+                created_by=exp.created_by,
+                approved_by=self.user_id,
+                project_id=exp.project_id,
+                extra_meta={
+                    "Total Amount": f"{exp.total_amount:,.2f}",
+                },
+            )
+
         return exp
 
     async def submit_expense(self, expense_id: str) -> Expense:
@@ -311,6 +360,21 @@ class FinanceService:
             raise ValidationError("Only draft expenses can be submitted")
         exp.status = ExpenseStatus.SUBMITTED
         await self.db.flush()
+
+        notif = NotificationService(self.db, self.tenant_id)
+        await notif.notify_submitted(
+            module="finance",
+            item_type="expense",
+            item_id=exp.id,
+            item_number=exp.expense_number,
+            submitted_by=self.user_id,
+            project_id=exp.project_id,
+            extra_meta={
+                "Total Amount": f"{exp.total_amount:,.2f}",
+                "Category": exp.category.value if hasattr(exp.category, "value") else str(exp.category),
+            },
+        )
+
         return exp
 
     # ── Change Orders ─────────────────────────────────────────────
@@ -363,6 +427,22 @@ class FinanceService:
                 co.original_contract_value + co.amount, 2
             )
         await self.db.flush()
+
+        if co.created_by:
+            notif = NotificationService(self.db, self.tenant_id)
+            await notif.notify_approved(
+                module="finance",
+                item_type="change_order",
+                item_id=co.id,
+                item_number=co.co_number,
+                created_by=co.created_by,
+                approved_by=self.user_id,
+                project_id=co.project_id,
+                extra_meta={
+                    "Amount": f"{co.amount:,.2f}",
+                },
+            )
+
         return co
 
     async def submit_change_order(self, co_id: str) -> ChangeOrder:
@@ -378,6 +458,20 @@ class FinanceService:
             raise ValidationError("Only draft change orders can be submitted")
         co.status = ChangeOrderStatus.SUBMITTED
         await self.db.flush()
+
+        notif = NotificationService(self.db, self.tenant_id)
+        await notif.notify_submitted(
+            module="finance",
+            item_type="change_order",
+            item_id=co.id,
+            item_number=co.co_number,
+            submitted_by=self.user_id,
+            project_id=co.project_id,
+            extra_meta={
+                "Amount": f"{co.amount:,.2f}",
+            },
+        )
+
         return co
 
     # ── Payment Certificates ──────────────────────────────────────
@@ -481,9 +575,10 @@ class FinanceService:
 
     async def get_cashflow(self, project_id: str) -> list[dict]:
         """Monthly cashflow — invoiced vs received vs expenses."""
+        inv_month = func.date_trunc("month", Invoice.invoice_date)
         inv_result = await self.db.execute(
             select(
-                func.date_trunc("month", Invoice.invoice_date).label("month"),
+                inv_month.label("month"),
                 func.sum(Invoice.grand_total).label("invoiced"),
                 func.sum(Invoice.paid_amount).label("received"),
             )
@@ -491,20 +586,21 @@ class FinanceService:
                 Invoice.project_id == project_id,
                 self._scope(Invoice),
             ))
-            .group_by(func.date_trunc("month", Invoice.invoice_date))
-            .order_by(func.date_trunc("month", Invoice.invoice_date))
+            .group_by(inv_month)
+            .order_by(inv_month)
         )
 
+        exp_month = func.date_trunc("month", Expense.expense_date)
         exp_result = await self.db.execute(
             select(
-                func.date_trunc("month", Expense.expense_date).label("month"),
+                exp_month.label("month"),
                 func.sum(Expense.total_amount).label("expenses"),
             )
             .where(and_(
                 Expense.project_id == project_id,
                 self._scope(Expense),
             ))
-            .group_by(func.date_trunc("month", Expense.expense_date))
+            .group_by(exp_month)
         )
 
         exp_map = {str(r.month)[:7]: r.expenses or 0 for r in exp_result.all()}
