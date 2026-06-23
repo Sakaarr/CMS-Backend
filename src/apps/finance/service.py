@@ -13,11 +13,19 @@ from src.apps.finance.schemas import (
     CreateInvoiceRequest, UpdateInvoiceRequest, RecordPaymentRequest,
     CreateExpenseRequest, CreateChangeOrderRequest, CreatePaymentCertRequest,
 )
+from src.apps.projects.models import Project
+from src.apps.identity.models import User
 from src.core.exceptions import (
     NotFoundError, ConflictError, ValidationError
 )
-from src.core.notifications import NotificationService
+from src.core.email_templates import (
+    approval_requested_html, item_approved_html, item_rejected_html,
+    notify_permission_holders, notify_user_by_id,
+)
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 def _num(prefix: str) -> str:
@@ -159,21 +167,19 @@ class FinanceService:
         inv.approved_by = self.user_id
         await self.db.flush()
 
-        if inv.created_by:
-            notif = NotificationService(self.db, self.tenant_id)
-            await notif.notify_approved(
-                module="finance",
-                item_type="invoice",
-                item_id=inv.id,
-                item_number=inv.invoice_number,
-                created_by=inv.created_by,
-                approved_by=self.user_id,
-                project_id=inv.project_id,
-                extra_meta={
-                    "Grand Total": f"{inv.grand_total:,.2f}",
-                    "Currency": inv.currency or "NPR",
-                },
-            )
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == inv.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            approver_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "An approver"
+            html = item_approved_html("Invoice", inv.invoice_number, proj_name, approver_name)
+            await notify_user_by_id(self.db, inv.created_by, f"Invoice {inv.invoice_number} Approved", html)
+        except Exception as e:
+            logger.warning(f"Failed to send invoice approval email: {e}")
 
         return inv
 
@@ -184,19 +190,42 @@ class FinanceService:
         inv.status = InvoiceStatus.SUBMITTED
         await self.db.flush()
 
-        notif = NotificationService(self.db, self.tenant_id)
-        await notif.notify_submitted(
-            module="finance",
-            item_type="invoice",
-            item_id=inv.id,
-            item_number=inv.invoice_number,
-            submitted_by=self.user_id,
-            project_id=inv.project_id,
-            extra_meta={
-                "Grand Total": f"{inv.grand_total:,.2f}",
-                "Currency": inv.currency or "NPR",
-            },
-        )
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == inv.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            submitter_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "A user"
+            html = approval_requested_html("Invoice", inv.invoice_number, proj_name, submitter_name)
+            await notify_permission_holders(
+                self.db, self.tenant_id, "can_finance",
+                self.user_id, f"Invoice {inv.invoice_number} Awaiting Approval", html,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send invoice submission email: {e}")
+
+        return inv
+
+    async def reject_invoice(self, invoice_id: str, reason: str | None = None) -> Invoice:
+        inv = await self.get_invoice(invoice_id)
+        if inv.status != InvoiceStatus.SUBMITTED:
+            raise ValidationError("Only submitted invoices can be rejected")
+        inv.status = InvoiceStatus.REJECTED
+        await self.db.flush()
+
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == inv.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            html = item_rejected_html("Invoice", inv.invoice_number, proj_name, reason)
+            await notify_user_by_id(self.db, inv.created_by, f"Invoice {inv.invoice_number} Rejected", html)
+        except Exception as e:
+            logger.warning(f"Failed to send invoice rejection email: {e}")
 
         return inv
 
@@ -337,20 +366,19 @@ class FinanceService:
         exp.approved_by = self.user_id
         await self.db.flush()
 
-        if exp.created_by:
-            notif = NotificationService(self.db, self.tenant_id)
-            await notif.notify_approved(
-                module="finance",
-                item_type="expense",
-                item_id=exp.id,
-                item_number=exp.expense_number,
-                created_by=exp.created_by,
-                approved_by=self.user_id,
-                project_id=exp.project_id,
-                extra_meta={
-                    "Total Amount": f"{exp.total_amount:,.2f}",
-                },
-            )
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == exp.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            approver_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "An approver"
+            html = item_approved_html("Expense", exp.expense_number, proj_name, approver_name)
+            await notify_user_by_id(self.db, exp.created_by, f"Expense {exp.expense_number} Approved", html)
+        except Exception as e:
+            logger.warning(f"Failed to send expense approval email: {e}")
 
         return exp
 
@@ -361,19 +389,42 @@ class FinanceService:
         exp.status = ExpenseStatus.SUBMITTED
         await self.db.flush()
 
-        notif = NotificationService(self.db, self.tenant_id)
-        await notif.notify_submitted(
-            module="finance",
-            item_type="expense",
-            item_id=exp.id,
-            item_number=exp.expense_number,
-            submitted_by=self.user_id,
-            project_id=exp.project_id,
-            extra_meta={
-                "Total Amount": f"{exp.total_amount:,.2f}",
-                "Category": exp.category.value if hasattr(exp.category, "value") else str(exp.category),
-            },
-        )
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == exp.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            submitter_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "A user"
+            html = approval_requested_html("Expense", exp.expense_number, proj_name, submitter_name)
+            await notify_permission_holders(
+                self.db, self.tenant_id, "can_finance",
+                self.user_id, f"Expense {exp.expense_number} Awaiting Approval", html,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send expense submission email: {e}")
+
+        return exp
+
+    async def reject_expense(self, expense_id: str, reason: str | None = None) -> Expense:
+        exp = await self.get_expense(expense_id)
+        if exp.status != ExpenseStatus.SUBMITTED:
+            raise ValidationError("Only submitted expenses can be rejected")
+        exp.status = ExpenseStatus.REJECTED
+        await self.db.flush()
+
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == exp.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            html = item_rejected_html("Expense", exp.expense_number, proj_name, reason)
+            await notify_user_by_id(self.db, exp.created_by, f"Expense {exp.expense_number} Rejected", html)
+        except Exception as e:
+            logger.warning(f"Failed to send expense rejection email: {e}")
 
         return exp
 
@@ -428,20 +479,19 @@ class FinanceService:
             )
         await self.db.flush()
 
-        if co.created_by:
-            notif = NotificationService(self.db, self.tenant_id)
-            await notif.notify_approved(
-                module="finance",
-                item_type="change_order",
-                item_id=co.id,
-                item_number=co.co_number,
-                created_by=co.created_by,
-                approved_by=self.user_id,
-                project_id=co.project_id,
-                extra_meta={
-                    "Amount": f"{co.amount:,.2f}",
-                },
-            )
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == co.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            approver_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "An approver"
+            html = item_approved_html("Change Order", co.co_number, proj_name, approver_name)
+            await notify_user_by_id(self.db, co.created_by, f"CO {co.co_number} Approved", html)
+        except Exception as e:
+            logger.warning(f"Failed to send CO approval email: {e}")
 
         return co
 
@@ -459,18 +509,49 @@ class FinanceService:
         co.status = ChangeOrderStatus.SUBMITTED
         await self.db.flush()
 
-        notif = NotificationService(self.db, self.tenant_id)
-        await notif.notify_submitted(
-            module="finance",
-            item_type="change_order",
-            item_id=co.id,
-            item_number=co.co_number,
-            submitted_by=self.user_id,
-            project_id=co.project_id,
-            extra_meta={
-                "Amount": f"{co.amount:,.2f}",
-            },
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == co.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            submitter_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "A user"
+            html = approval_requested_html("Change Order", co.co_number, proj_name, submitter_name)
+            await notify_permission_holders(
+                self.db, self.tenant_id, "can_finance",
+                self.user_id, f"CO {co.co_number} Awaiting Approval", html,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send CO submission email: {e}")
+
+        return co
+
+    async def reject_change_order(self, co_id: str, reason: str | None = None) -> ChangeOrder:
+        result = await self.db.execute(
+            select(ChangeOrder).where(and_(
+                ChangeOrder.id == co_id, self._scope(ChangeOrder)
+            ))
         )
+        co = result.scalar_one_or_none()
+        if not co:
+            raise NotFoundError("Change Order")
+        if co.status != ChangeOrderStatus.SUBMITTED:
+            raise ValidationError("Only submitted change orders can be rejected")
+        co.status = ChangeOrderStatus.REJECTED
+        await self.db.flush()
+
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == co.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            html = item_rejected_html("Change Order", co.co_number, proj_name, reason)
+            await notify_user_by_id(self.db, co.created_by, f"CO {co.co_number} Rejected", html)
+        except Exception as e:
+            logger.warning(f"Failed to send CO rejection email: {e}")
 
         return co
 

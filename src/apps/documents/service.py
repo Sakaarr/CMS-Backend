@@ -9,10 +9,18 @@ from src.apps.documents.schemas import (
     CreateDocumentRequest, UpdateDocumentRequest,
     AddRevisionRequest, ApprovalActionRequest, AddApproverRequest,
 )
-from src.core.exceptions import NotFoundError, ValidationError, ConflictError
-from src.core.notifications import NotificationService
+from src.apps.projects.models import Project
 from src.apps.identity.models import User
+from src.core.exceptions import NotFoundError, ValidationError, ConflictError
+from src.core.email_templates import (
+    approval_requested_html, item_approved_html, item_rejected_html,
+    notify_user_by_id,
+)
+from src.core.email import send_email
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 def _doc_number() -> str:
@@ -128,33 +136,41 @@ class DocumentService:
         doc.status = DocumentStatus.UNDER_REVIEW
         await self.db.flush()
 
-        doc = await self.get_document(document_id)
-        submitter = await self._get_user(self.user_id)
-        submitter_name = submitter.full_name if submitter else "Unknown"
-
-        notif = NotificationService(self.db, self.tenant_id)
-        for approval in doc.approvals:
-            if approval.status == ApprovalStatus.PENDING:
-                approver_result = await self.db.execute(
-                    select(User).where(User.id == approval.approver_id)
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == doc.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            submitter_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "A user"
+            html_body = approval_requested_html(
+                "Document", doc.document_number, proj_name, submitter_name
+            )
+            # Notify all pending approvers
+            pending = await self.db.execute(
+                select(DocumentApproval).where(and_(
+                    DocumentApproval.document_id == document_id,
+                    DocumentApproval.status == ApprovalStatus.PENDING,
+                    self._scope(DocumentApproval),
+                ))
+            )
+            for appr in pending.scalars().all():
+                user_result = await self.db.execute(
+                    select(User.email).where(User.id == appr.approver_id)
                 )
-                approver = approver_result.scalar_one_or_none()
-                if approver:
-                    await notif.notify_submitted_to_approver(
-                        module="documents",
-                        item_type="document",
-                        item_id=doc.id,
-                        item_number=doc.document_number,
-                        submitted_by_name=submitter_name,
-                        approver=approver,
-                        project_id=doc.project_id,
-                        extra_meta={
-                            "Title": doc.title,
-                            "Document Number": doc.document_number,
-                        },
+                email = user_result.scalar_one_or_none()
+                if email:
+                    send_email(
+                        email,
+                        f"Document {doc.document_number} Requires Your Review",
+                        html_body,
                     )
+        except Exception as e:
+            logger.warning(f"Failed to send document review email: {e}")
 
-        return doc
+        return await self.get_document(document_id)
 
     async def add_revision(
         self, document_id: str, data: AddRevisionRequest
@@ -235,6 +251,7 @@ class DocumentService:
             )
         )).scalars().all()
 
+        old_status = doc.status
         if all(a.status == ApprovalStatus.APPROVED for a in all_approvals):
             doc.status = DocumentStatus.APPROVED
         elif any(a.status == ApprovalStatus.REJECTED for a in all_approvals):
@@ -242,32 +259,36 @@ class DocumentService:
 
         await self.db.flush()
 
-        if data.status == ApprovalStatus.APPROVED:
-            notif = NotificationService(self.db, self.tenant_id)
-            if doc.created_by:
-                await notif.notify_approved(
-                    module="documents",
-                    item_type="document",
-                    item_id=doc.id,
-                    item_number=doc.document_number,
-                    created_by=doc.created_by,
-                    approved_by=self.user_id,
-                    project_id=doc.project_id,
-                    extra_meta={"Title": doc.title},
-                )
-        elif data.status == ApprovalStatus.REJECTED:
-            notif = NotificationService(self.db, self.tenant_id)
-            if doc.created_by:
-                await notif.notify_rejected(
-                    module="documents",
-                    item_type="document",
-                    item_id=doc.id,
-                    item_number=doc.document_number,
-                    created_by=doc.created_by,
-                    rejected_by=self.user_id,
-                    project_id=doc.project_id,
-                    extra_meta={"Title": doc.title},
-                )
+        try:
+            if doc.status != old_status:
+                proj = (await self.db.execute(
+                    select(Project.name, Project.code)
+                    .where(Project.id == doc.project_id)
+                )).one_or_none()
+                proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+                approver_name = (await self.db.execute(
+                    select(User.full_name).where(User.id == self.user_id)
+                )).scalar_one_or_none() or "A reviewer"
+
+                if doc.status == DocumentStatus.APPROVED:
+                    html_body = item_approved_html(
+                        "Document", doc.document_number, proj_name, approver_name
+                    )
+                    await notify_user_by_id(
+                        self.db, doc.uploaded_by or doc.created_by,
+                        f"Document {doc.document_number} Approved", html_body,
+                    )
+                elif doc.status == DocumentStatus.REJECTED:
+                    reason = approval.comments
+                    html_body = item_rejected_html(
+                        "Document", doc.document_number, proj_name, reason
+                    )
+                    await notify_user_by_id(
+                        self.db, doc.uploaded_by or doc.created_by,
+                        f"Document {doc.document_number} Rejected", html_body,
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to send document approval email: {e}")
 
         return approval
 

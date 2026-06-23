@@ -220,6 +220,18 @@ class PaymentCertResponse(BaseModel):
 
 # ── Finance Summary ───────────────────────────────────────────────
 
+class RejectInvoiceRequest(BaseModel):
+    reason: str | None = None
+
+
+class RejectExpenseRequest(BaseModel):
+    reason: str | None = None
+
+
+class RejectChangeOrderRequest(BaseModel):
+    reason: str | None = None
+
+
 class FinanceSummary(BaseModel):
     total_invoiced: float
     total_received: float

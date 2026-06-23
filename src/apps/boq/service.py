@@ -12,7 +12,14 @@ from src.apps.boq.schemas import (
     CreateRateAnalysisRequest,
 )
 from src.core.exceptions import NotFoundError, ConflictError, ValidationError
-from src.core.notifications import NotificationService
+from src.apps.projects.models import Project
+from src.apps.identity.models import User
+from src.core.email_templates import (
+    item_approved_html, notify_user_by_id,
+)
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class BOQService:
@@ -165,22 +172,19 @@ class BOQService:
         bv.approved_by = self.user_id
         await self.db.flush()
 
-        if bv.created_by:
-            notif = NotificationService(self.db, self.tenant_id)
-            await notif.notify_approved(
-                module="boq",
-                item_type="budget_version",
-                item_id=bv.id,
-                item_number=f"{bv.name} v{bv.version_number}",
-                created_by=bv.created_by,
-                approved_by=self.user_id,
-                project_id=bv.project_id,
-                extra_meta={
-                    "Version": str(bv.version_number),
-                    "Grand Total": f"{bv.grand_total:,.2f}" if bv.grand_total else "N/A",
-                    "Currency": bv.currency or "NPR",
-                },
-            )
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == bv.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            approver_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "An approver"
+            html = item_approved_html("Budget Version", bv.name or bv.id, proj_name, approver_name)
+            await notify_user_by_id(self.db, bv.created_by, f"Budget Version {bv.name} Approved", html)
+        except Exception as e:
+            logger.warning(f"Failed to send budget version approval email: {e}")
 
         return bv
 

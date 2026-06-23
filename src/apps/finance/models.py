@@ -14,6 +14,7 @@ class InvoiceStatus(str, enum.Enum):
     DRAFT = "draft"
     SUBMITTED = "submitted"
     APPROVED = "approved"
+    REJECTED = "rejected"
     PARTIALLY_PAID = "partially_paid"
     PAID = "paid"
     OVERDUE = "overdue"

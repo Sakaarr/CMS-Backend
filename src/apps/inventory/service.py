@@ -8,9 +8,17 @@ from src.apps.inventory.models import (
 from src.apps.inventory.schemas import (
     CreateWarehouseRequest, StockAdjustmentRequest, CreateMRRequest
 )
+from src.apps.projects.models import Project
+from src.apps.identity.models import User
 from src.core.exceptions import NotFoundError, ConflictError, ValidationError
-from src.core.notifications import NotificationService
+from src.core.email_templates import (
+    approval_requested_html, item_approved_html, item_rejected_html,
+    notify_permission_holders, notify_user_by_id,
+)
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 def _mr_number() -> str:
@@ -265,19 +273,41 @@ class InventoryService:
         mr.approved_by = self.user_id
         await self.db.flush()
 
-        if mr.created_by:
-            notif = NotificationService(self.db, self.tenant_id)
-            await notif.notify_approved(
-                module="inventory",
-                item_type="material_request",
-                item_id=mr.id,
-                item_number=mr.mr_number,
-                created_by=mr.created_by,
-                approved_by=self.user_id,
-                project_id=mr.project_id,
-            )
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == mr.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            approver_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "An approver"
+            html = item_approved_html("Material Request", mr.mr_number, proj_name, approver_name)
+            await notify_user_by_id(self.db, mr.created_by, f"MR {mr.mr_number} Approved", html)
+        except Exception as e:
+            logger.warning(f"Failed to send MR approval email: {e}")
 
         return await self.get_mr(mr_id)
+
+    async def reject_mr(self, mr_id: str, reason: str | None = None) -> MaterialRequest:
+        mr = await self.get_mr(mr_id)
+        if mr.status != MaterialRequestStatus.SUBMITTED:
+            raise ValidationError("Only submitted MRs can be rejected")
+        mr.status = MaterialRequestStatus.REJECTED
+        await self.db.flush()
+
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == mr.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            html = item_rejected_html("Material Request", mr.mr_number, proj_name, reason)
+            await notify_user_by_id(self.db, mr.created_by, f"MR {mr.mr_number} Rejected", html)
+        except Exception as e:
+            logger.warning(f"Failed to send MR rejection email: {e}")
+
+        return mr
 
     async def issue_mr(self, mr_id: str) -> MaterialRequest:
         mr = await self.get_mr(mr_id)
@@ -322,14 +352,21 @@ class InventoryService:
         mr.status = MaterialRequestStatus.SUBMITTED
         await self.db.flush()
 
-        notif = NotificationService(self.db, self.tenant_id)
-        await notif.notify_submitted(
-            module="inventory",
-            item_type="material_request",
-            item_id=mr.id,
-            item_number=mr.mr_number,
-            submitted_by=self.user_id,
-            project_id=mr.project_id,
-        )
+        try:
+            proj = (await self.db.execute(
+                select(Project.name, Project.code)
+                .where(Project.id == mr.project_id)
+            )).one_or_none()
+            proj_name = f"{proj[0]} ({proj[1]})" if proj else "—"
+            submitter_name = (await self.db.execute(
+                select(User.full_name).where(User.id == self.user_id)
+            )).scalar_one_or_none() or "A user"
+            html = approval_requested_html("Material Request", mr.mr_number, proj_name, submitter_name)
+            await notify_permission_holders(
+                self.db, self.tenant_id, "can_procurement",
+                self.user_id, f"MR {mr.mr_number} Awaiting Approval", html,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send MR submission email: {e}")
 
         return mr
