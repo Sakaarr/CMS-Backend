@@ -17,7 +17,10 @@ from src.apps.identity.models import User
 from src.core.email_templates import (
     item_approved_html, notify_user_by_id,
 )
+from src.apps.boq.models import UnitOfMeasure
 import logging
+import openpyxl
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +279,124 @@ class BOQService:
         item.deleted_at = datetime.now(timezone.utc)
         await self.db.flush()
         await self._recalculate_version_totals(item.budget_version_id)
+
+    async def import_boq_items_from_excel(
+        self, project_id: str, version_id: str, file_content: bytes
+    ) -> dict:
+        bv = await self.get_budget_version(version_id)
+        if bv.status == BudgetVersionStatus.APPROVED:
+            raise ValidationError("Cannot modify an approved budget version")
+
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
+        except Exception as e:
+            raise ValidationError(f"Could not read the Excel file: {e}")
+        ws = wb.active
+        if ws is None:
+            raise ValidationError("Spreadsheet has no active sheet")
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows or len(rows) < 2:
+            raise ValidationError("Spreadsheet must have a header row and at least one data row")
+
+        headers = [str(h).strip().lower().replace(" ", "_") if h else "" for h in rows[0]]
+        col_map = {}
+        aliases = {
+            "item_number": ["item_number", "item no", "item no.", "item_no", "no", "number", "sno", "s.no", "sn"],
+            "description": ["description", "desc", "description of work", "work description", "item description", "particulars", "particular"],
+            "unit": ["unit", "uom", "measure", "measurement", "unit_of_measure"],
+            "quantity": ["quantity", "qty", "qty.", "quantities", "total qty"],
+            "unit_rate": ["unit_rate", "unit rate", "rate", "price", "unit price", "rate per unit"],
+            "material_rate": ["material_rate", "material rate", "material", "mat rate"],
+            "labour_rate": ["labour_rate", "labour rate", "labor_rate", "labor rate", "labour", "labor"],
+            "equipment_rate": ["equipment_rate", "equipment rate", "equipment", "plant rate"],
+            "overhead_rate": ["overhead_rate", "overhead rate", "overhead", "oh rate"],
+            "specification": ["specification", "spec", "specs", "technical spec"],
+            "is_section_header": ["is_section_header", "section header", "section_header", "header", "section"],
+            "sort_order": ["sort_order", "sort order", "order", "row order", "sequence"],
+        }
+        for i, h in enumerate(headers):
+            cleaned = h.replace("-", "_").replace(".", "").strip().lower()
+            for field, alternatives in aliases.items():
+                if cleaned in alternatives:
+                    col_map[field] = i
+                    break
+
+        if "item_number" not in col_map:
+            raise ValidationError("Spreadsheet must have an 'item_number' column")
+        if "description" not in col_map:
+            raise ValidationError("Spreadsheet must have a 'description' column")
+
+        unit_map = {e.value.lower(): e for e in UnitOfMeasure}
+        imported = 0
+        skipped = 0
+        errors = []
+        items_to_create = []
+
+        for row_idx, row in enumerate(rows[1:], start=2):
+            try:
+                item_number = str(row[col_map["item_number"]] or "").strip()
+                description = str(row[col_map["description"]] or "").strip()
+                if not item_number or not description:
+                    skipped += 1
+                    continue
+
+                raw_unit = str(row[col_map.get("unit", -1)] or "").strip().lower() if "unit" in col_map else ""
+                unit = unit_map.get(raw_unit, UnitOfMeasure.NOS)
+
+                quantity = float(row[col_map.get("quantity", -1)] or 0) if "quantity" in col_map else 0.0
+                unit_rate = float(row[col_map.get("unit_rate", -1)] or 0) if "unit_rate" in col_map else 0.0
+                material_rate = float(row[col_map.get("material_rate", -1)] or 0) if "material_rate" in col_map else 0.0
+                labour_rate = float(row[col_map.get("labour_rate", -1)] or 0) if "labour_rate" in col_map else 0.0
+                equipment_rate = float(row[col_map.get("equipment_rate", -1)] or 0) if "equipment_rate" in col_map else 0.0
+                overhead_rate = float(row[col_map.get("overhead_rate", -1)] or 0) if "overhead_rate" in col_map else 0.0
+                specification = str(row[col_map.get("specification", -1)] or "").strip() if "specification" in col_map else None
+                raw_header = str(row[col_map.get("is_section_header", -1)] or "").strip().lower() if "is_section_header" in col_map else ""
+                is_section_header = raw_header in ("yes", "true", "1", "y")
+                sort_order = int(row[col_map.get("sort_order", -1)] or 0) if "sort_order" in col_map else 0
+
+                if unit_rate == 0.0:
+                    unit_rate = material_rate + labour_rate + equipment_rate + overhead_rate
+
+                amount = round(quantity * unit_rate, 2)
+                item = BOQItem(
+                    item_number=item_number,
+                    description=description,
+                    specification=specification or None,
+                    unit=unit,
+                    quantity=quantity,
+                    unit_rate=unit_rate,
+                    amount=amount,
+                    material_rate=material_rate,
+                    labour_rate=labour_rate,
+                    equipment_rate=equipment_rate,
+                    overhead_rate=overhead_rate,
+                    is_section_header=is_section_header,
+                    sort_order=sort_order,
+                    project_id=project_id,
+                    budget_version_id=version_id,
+                    tenant_id=self.tenant_id,
+                    created_by=self.user_id,
+                    actual_quantity=0.0,
+                    actual_amount=0.0,
+                    status=BOQItemStatus.DRAFT,
+                )
+                items_to_create.append(item)
+                imported += 1
+            except Exception as e:
+                errors.append(f"Row {row_idx}: {e}")
+                skipped += 1
+
+        if items_to_create:
+            self.db.add_all(items_to_create)
+            await self.db.flush()
+            await self._recalculate_version_totals(version_id)
+
+        return {
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors,
+            "items": items_to_create,
+        }
 
     async def _recalculate_version_totals(self, version_id: str) -> None:
         result = await self.db.execute(
