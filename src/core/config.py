@@ -15,8 +15,7 @@ class Settings(BaseSettings):
 
     app_name: str = "CMS Platform"
     app_env: str = "development"
-    app_debug: bool= True
-    secret_key: str
+    app_debug: bool = True
     api_prefix: str = "/api/v1"
     # Storage — S3/MinIO (leave blank to use local disk in dev)
     s3_bucket: str = ""
@@ -72,7 +71,7 @@ class Settings(BaseSettings):
     
     #First Superadmin
     first_superadmin_email: str = "admin@cms.com"
-    first_superadmin_password: str = "StrongPass123!"
+    first_superadmin_password: str
 
     @property
     def is_production(self) -> bool:

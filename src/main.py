@@ -10,6 +10,7 @@ from src.core.config import settings
 from src.core.database import create_all_tables
 from src.core.exceptions import AppException
 from src.core.middleware import RequestIDMiddleware, TimingMiddleware, TenantMiddleware
+from src.core.logging_config import setup_logging
 from fastapi.staticfiles import StaticFiles
 import os
 from src.apps.identity.router import router as auth_router, user_router
@@ -26,7 +27,7 @@ from src.apps.approvals.router import router as approvals_router
 from src.apps.reports.router import router as reports_router
 from src.apps.dashboard.router import router as dashboard_router
 
-logging.basicConfig(level=logging.INFO)
+setup_logging(settings.app_env)
 logger = logging.getLogger(__name__)
 
 
