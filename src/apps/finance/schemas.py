@@ -52,6 +52,7 @@ class InvoiceLineItemResponse(BaseModel):
     unit_rate: float
     amount: float
     sort_order: int
+    boq_item_id: str | None = None
     model_config = {"from_attributes": True}
 
 
@@ -158,6 +159,7 @@ class ExpenseResponse(BaseModel):
     pan_number: str | None
     notes: str | None
     approved_by: str | None
+    boq_item_id: str | None = None
     model_config = {"from_attributes": True}
 
 

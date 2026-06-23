@@ -173,6 +173,7 @@ class POItemResponse(BaseModel):
     unit_rate: float
     amount: float
     received_quantity: float
+    boq_item_id: str | None = None
     model_config = {"from_attributes": True}
 
 

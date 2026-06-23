@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page {
+    size: A4 landscape;
+    margin: 20mm 15mm;
+    @bottom-center {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 9px;
+      color: #6b7280;
+      font-family: 'DejaVu Sans', sans-serif;
+    }
+  }
+  body {
+    font-family: 'DejaVu Sans', sans-serif;
+    font-size: 9pt;
+    color: #1f2937;
+    margin: 0;
+    padding: 0;
+    line-height: 1.5;
+  }
+  .header {
+    border-bottom: 3px solid {{ primary_color or '#2563eb' }};
+    padding-bottom: 12px;
+    margin-bottom: 18px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .header-left h1 {
+    font-size: 18pt;
+    color: {{ primary_color or '#2563eb' }};
+    margin: 0;
+    font-weight: 700;
+  }
+  .header-right {
+    text-align: right;
+    font-size: 8pt;
+    color: #6b7280;
+  }
+  .title-section {
+    margin-bottom: 20px;
+  }
+  .title-section h2 {
+    font-size: 16pt;
+    color: {{ primary_color or '#2563eb' }};
+    margin: 0;
+  }
+  .title-section .subtitle {
+    font-size: 10pt;
+    color: #6b7280;
+  }
+  .summary-cards {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .card {
+    flex: 1;
+    padding: 8px 12px;
+    background: #f9fafb;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+  }
+  .card .label {
+    font-size: 7pt;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .card .value {
+    font-size: 11pt;
+    font-weight: 700;
+    color: {{ primary_color or '#2563eb' }};
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8pt;
+  }
+  table th {
+    background: {{ primary_color or '#2563eb' }};
+    color: #fff;
+    padding: 6px 8px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  table tr:nth-child(even) td {
+    background: #f9fafb;
+  }
+  .section-row td {
+    background: #e5e7eb !important;
+    font-weight: 700;
+    font-size: 9pt;
+    color: #374151;
+  }
+  table .amount {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  table .qty {
+    text-align: center;
+  }
+  .footer {
+    margin-top: 20px;
+    padding-top: 10px;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+    font-size: 7pt;
+    color: #9ca3af;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>{{ tenant.name }}</h1>
+    {% if tenant.pan_number %}
+    <div style="font-size:8pt;color:#9ca3af;">PAN: {{ tenant.pan_number }}</div>
+    {% endif %}
+  </div>
+  <div class="header-right">
+    {{ tenant.address or '' }}<br>
+    {{ tenant.email or '' }}<br>
+    {{ tenant.phone or '' }}
+  </div>
+</div>
+
+<div class="title-section">
+  <h2>Bill of Quantities</h2>
+  <div class="subtitle">
+    Project: {{ project.name }} ({{ project.code }}) &mdash;
+    Version: {{ version.name }} v{{ version.version_number }}
+    &mdash; Status: {{ version.status | title }}
+  </div>
+</div>
+
+<div class="summary-cards">
+  <div class="card">
+    <div class="label">Total Amount</div>
+    <div class="value">{{ version.currency }} {{ "%.2f"|format(version.total_amount) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Contingency ({{ "%.0f"|format(version.contingency_percentage) }}%)</div>
+    <div class="value">{{ version.currency }} {{ "%.2f"|format(version.contingency_amount) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Grand Total</div>
+    <div class="value">{{ version.currency }} {{ "%.2f"|format(version.grand_total) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Total Items</div>
+    <div class="value">{{ items | length }}</div>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:8%">Item #</th>
+      <th style="width:32%">Description</th>
+      <th style="width:8%">Unit</th>
+      <th style="width:10%" class="qty">Qty</th>
+      <th style="width:10%" class="amount">Rate</th>
+      <th style="width:10%" class="amount">Amount</th>
+      <th style="width:8%" class="amount">Material</th>
+      <th style="width:8%" class="amount">Labour</th>
+      <th style="width:8%" class="amount">Equipment</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in items %}
+    {% if item.is_section_header %}
+    <tr class="section-row">
+      <td>{{ item.item_number }}</td>
+      <td colspan="8">{{ item.description }}</td>
+    </tr>
+    {% else %}
+    <tr>
+      <td>{{ item.item_number }}</td>
+      <td>{{ item.description }}</td>
+      <td>{{ item.unit }}</td>
+      <td class="qty">{{ "%.2f"|format(item.quantity) }}</td>
+      <td class="amount">{{ "%.2f"|format(item.unit_rate) }}</td>
+      <td class="amount">{{ "%.2f"|format(item.amount) }}</td>
+      <td class="amount">{{ "%.2f"|format(item.material_rate) }}</td>
+      <td class="amount">{{ "%.2f"|format(item.labour_rate) }}</td>
+      <td class="amount">{{ "%.2f"|format(item.equipment_rate) }}</td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="footer">
+  Generated on {{ generated_at }} by CMS Platform
+</div>
+
+</body>
+</html>

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 15mm;
+    @top-center {
+      content: "";
+    }
+    @bottom-center {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 9px;
+      color: #6b7280;
+      font-family: 'DejaVu Sans', sans-serif;
+    }
+  }
+  body {
+    font-family: 'DejaVu Sans', sans-serif;
+    font-size: 10pt;
+    color: #1f2937;
+    margin: 0;
+    padding: 0;
+    line-height: 1.5;
+  }
+  .header {
+    border-bottom: 3px solid {{ primary_color or '#2563eb' }};
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .header-left h1 {
+    font-size: 22pt;
+    color: {{ primary_color or '#2563eb' }};
+    margin: 0;
+    font-weight: 700;
+  }
+  .header-left .company-name {
+    font-size: 14pt;
+    color: #374151;
+    margin-top: 4px;
+  }
+  .header-right {
+    text-align: right;
+    font-size: 9pt;
+    color: #6b7280;
+  }
+  .header-right .pan {
+    font-size: 8pt;
+    color: #9ca3af;
+  }
+  .title-section {
+    text-align: center;
+    margin-bottom: 25px;
+  }
+  .title-section h2 {
+    font-size: 18pt;
+    color: {{ primary_color or '#2563eb' }};
+    margin: 0 0 4px 0;
+    letter-spacing: 1px;
+  }
+  .title-section .invoice-number {
+    font-size: 11pt;
+    color: #6b7280;
+  }
+  .info-grid {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 25px;
+  }
+  .info-box {
+    width: 48%;
+    padding: 10px 12px;
+    background: #f9fafb;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+  }
+  .info-box h3 {
+    font-size: 9pt;
+    color: {{ primary_color or '#2563eb' }};
+    margin: 0 0 6px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .info-box p {
+    margin: 2px 0;
+    font-size: 9pt;
+    color: #374151;
+  }
+  .info-box .label {
+    color: #9ca3af;
+    font-size: 8pt;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 9pt;
+  }
+  table th {
+    background: {{ primary_color or '#2563eb' }};
+    color: #fff;
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  table tr:nth-child(even) td {
+    background: #f9fafb;
+  }
+  table .amount {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  table .qty {
+    text-align: center;
+  }
+  .totals {
+    margin-left: auto;
+    width: 320px;
+    border-collapse: collapse;
+    font-size: 9pt;
+  }
+  .totals td {
+    padding: 5px 12px;
+    border: none;
+  }
+  .totals .label {
+    text-align: right;
+    color: #6b7280;
+  }
+  .totals .value {
+    text-align: right;
+    font-weight: 600;
+    width: 100px;
+  }
+  .totals .grand-total td {
+    font-size: 12pt;
+    font-weight: 700;
+    color: {{ primary_color or '#2563eb' }};
+    border-top: 2px solid {{ primary_color or '#2563eb' }};
+    padding-top: 8px;
+  }
+  .notes-section {
+    margin-top: 25px;
+    padding: 12px;
+    background: #f9fafb;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+  }
+  .notes-section h3 {
+    font-size: 9pt;
+    color: {{ primary_color or '#2563eb' }};
+    margin: 0 0 6px 0;
+    text-transform: uppercase;
+  }
+  .notes-section p {
+    font-size: 9pt;
+    color: #6b7280;
+    margin: 0;
+    white-space: pre-wrap;
+  }
+  .footer {
+    margin-top: 30px;
+    padding-top: 15px;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+    font-size: 8pt;
+    color: #9ca3af;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>{{ tenant.name }}</h1>
+    {% if tenant.pan_number %}
+    <div class="pan">PAN: {{ tenant.pan_number }}</div>
+    {% endif %}
+  </div>
+  <div class="header-right">
+    {{ tenant.address or '' }}<br>
+    {{ tenant.email or '' }}<br>
+    {{ tenant.phone or '' }}
+  </div>
+</div>
+
+<div class="title-section">
+  <h2>{{ 'CREDIT NOTE' if invoice.invoice_type == 'vendor' else 'INVOICE' }}</h2>
+  <div class="invoice-number">{{ invoice.invoice_number }}</div>
+</div>
+
+<div class="info-grid">
+  <div class="info-box">
+    <h3>Bill To</h3>
+    {% if invoice.invoice_type == 'client' %}
+      <p><strong>{{ invoice.client_name or '—' }}</strong></p>
+      <p>{{ invoice.billing_address or '' }}</p>
+    {% elif invoice.vendor %}
+      <p><strong>{{ invoice.vendor.name }}</strong></p>
+      <p>{{ invoice.vendor.address or '' }}</p>
+      <p>PAN: {{ invoice.vendor.pan_number or '—' }}</p>
+    {% endif %}
+  </div>
+  <div class="info-box">
+    <h3>Invoice Details</h3>
+    <p><span class="label">Date:</span> {{ invoice.invoice_date }}</p>
+    <p><span class="label">Due Date:</span> {{ invoice.due_date or '—' }}</p>
+    {% if invoice.period_from %}
+    <p><span class="label">Period:</span> {{ invoice.period_from }} to {{ invoice.period_to }}</p>
+    {% endif %}
+    <p><span class="label">Status:</span> {{ invoice.status | replace('_', ' ') | title }}</p>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:5%">#</th>
+      <th style="width:40%">Description</th>
+      <th style="width:10%" class="qty">Qty</th>
+      <th style="width:10%">Unit</th>
+      <th style="width:15%" class="amount">Rate</th>
+      <th style="width:15%" class="amount">Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in invoice.line_items %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ item.description }}</td>
+      <td class="qty">{{ "%.2f"|format(item.quantity) }}</td>
+      <td>{{ item.unit }}</td>
+      <td class="amount">{{ "%.2f"|format(item.unit_rate) }}</td>
+      <td class="amount">{{ "%.2f"|format(item.amount) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<table class="totals">
+  <tr>
+    <td class="label">Subtotal</td>
+    <td class="value">{{ "%.2f"|format(invoice.subtotal) }}</td>
+  </tr>
+  {% if invoice.discount_amount > 0 %}
+  <tr>
+    <td class="label">Discount</td>
+    <td class="value">({{ "%.2f"|format(invoice.discount_amount) }})</td>
+  </tr>
+  {% endif %}
+  <tr>
+    <td class="label">Taxable Amount</td>
+    <td class="value">{{ "%.2f"|format(invoice.taxable_amount) }}</td>
+  </tr>
+  <tr>
+    <td class="label">VAT ({{ "%.0f"|format(invoice.vat_rate) }}%)</td>
+    <td class="value">{{ "%.2f"|format(invoice.vat_amount) }}</td>
+  </tr>
+  {% if invoice.retention_rate > 0 %}
+  <tr>
+    <td class="label">Retention ({{ "%.0f"|format(invoice.retention_rate) }}%)</td>
+    <td class="value">({{ "%.2f"|format(invoice.retention_amount) }})</td>
+  </tr>
+  {% endif %}
+  <tr class="grand-total">
+    <td class="label"><strong>Grand Total</strong></td>
+    <td class="value"><strong>{{ invoice.currency }} {{ "%.2f"|format(invoice.grand_total) }}</strong></td>
+  </tr>
+  {% if invoice.paid_amount > 0 %}
+  <tr>
+    <td class="label">Paid</td>
+    <td class="value">({{ "%.2f"|format(invoice.paid_amount) }})</td>
+  </tr>
+  <tr style="font-weight:700; border-top:1px solid #e5e7eb;">
+    <td class="label">Balance Due</td>
+    <td class="value">{{ invoice.currency }} {{ "%.2f"|format(invoice.balance_due) }}</td>
+  </tr>
+  {% endif %}
+</table>
+
+{% if invoice.notes %}
+<div class="notes-section">
+  <h3>Notes</h3>
+  <p>{{ invoice.notes }}</p>
+</div>
+{% endif %}
+
+{% if invoice.terms %}
+<div class="notes-section" style="margin-top:10px;">
+  <h3>Terms & Conditions</h3>
+  <p>{{ invoice.terms }}</p>
+</div>
+{% endif %}
+
+<div class="footer">
+  This is a computer-generated document. No signature is required.<br>
+  Generated on {{ generated_at }} by CMS Platform
+</div>
+
+</body>
+</html>
