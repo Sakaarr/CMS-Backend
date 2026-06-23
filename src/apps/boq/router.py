@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File
 from src.apps.boq.service import BOQService
 from src.apps.boq.schemas import (
     CreateCostCodeRequest, UpdateCostCodeRequest, CostCodeResponse,
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.shared.response import APIResponse, success_response
 from src.core.dependencies import require_module
+from src.core.exceptions import ValidationError
 
 router = APIRouter(tags=["BOQ & Estimation"])
 
@@ -134,3 +135,24 @@ async def update_boq_item(
 async def delete_boq_item(item_id: str, svc: BOQService = Depends(get_boq_service)):
     await svc.delete_boq_item(item_id)
     return success_response(message="BOQ item deleted")
+
+
+@router.post("/projects/{project_id}/budget-versions/{version_id}/import-items",
+    status_code=201)
+async def import_boq_items(
+    project_id: str, version_id: str,
+    file: UploadFile = File(...),
+    svc: BOQService = Depends(get_boq_service),
+):
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise ValidationError("File must be an Excel (.xlsx or .xls) file")
+    content = await file.read()
+    result = await svc.import_boq_items_from_excel(project_id, version_id, content)
+    return success_response(
+        data={
+            "imported": result["imported"],
+            "skipped": result["skipped"],
+            "errors": result["errors"],
+        },
+        message=f"Imported {result['imported']} items",
+    )

@@ -202,6 +202,15 @@ class RateAnalysisResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Import ─────────────────────────────────────────────────────────
+
+class ImportBOQItemsResponse(BaseModel):
+    imported: int
+    skipped: int
+    errors: list[str]
+    items: list[BOQItemResponse]
+
+
 # ── Summary ───────────────────────────────────────────────────────
 
 class BOQSummary(BaseModel):
