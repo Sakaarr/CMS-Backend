@@ -9,6 +9,7 @@ from src.apps.inventory.schemas import (
     CreateWarehouseRequest, StockAdjustmentRequest, CreateMRRequest
 )
 from src.core.exceptions import NotFoundError, ConflictError, ValidationError
+from src.core.notifications import NotificationService
 import uuid
 
 
@@ -263,6 +264,19 @@ class InventoryService:
         mr.status = MaterialRequestStatus.APPROVED
         mr.approved_by = self.user_id
         await self.db.flush()
+
+        if mr.created_by:
+            notif = NotificationService(self.db, self.tenant_id)
+            await notif.notify_approved(
+                module="inventory",
+                item_type="material_request",
+                item_id=mr.id,
+                item_number=mr.mr_number,
+                created_by=mr.created_by,
+                approved_by=self.user_id,
+                project_id=mr.project_id,
+            )
+
         return await self.get_mr(mr_id)
 
     async def issue_mr(self, mr_id: str) -> MaterialRequest:
@@ -307,4 +321,15 @@ class InventoryService:
             raise ValidationError("Only draft MRs can be submitted")
         mr.status = MaterialRequestStatus.SUBMITTED
         await self.db.flush()
+
+        notif = NotificationService(self.db, self.tenant_id)
+        await notif.notify_submitted(
+            module="inventory",
+            item_type="material_request",
+            item_id=mr.id,
+            item_number=mr.mr_number,
+            submitted_by=self.user_id,
+            project_id=mr.project_id,
+        )
+
         return mr
