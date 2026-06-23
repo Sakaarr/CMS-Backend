@@ -72,6 +72,7 @@ class MRItemRequest(BaseModel):
     unit: str
     requested_quantity: float
     stock_item_id: str | None = None
+    boq_item_id: str | None = None
     remarks: str | None = None
 
 
@@ -91,6 +92,7 @@ class MRItemResponse(BaseModel):
     requested_quantity: float
     approved_quantity: float
     issued_quantity: float
+    boq_item_id: str | None = None
     remarks: str | None
     model_config = {"from_attributes": True}
 

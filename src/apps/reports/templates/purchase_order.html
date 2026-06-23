@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 15mm;
+    @bottom-center {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 9px;
+      color: #6b7280;
+      font-family: 'DejaVu Sans', sans-serif;
+    }
+  }
+  body {
+    font-family: 'DejaVu Sans', sans-serif;
+    font-size: 10pt;
+    color: #1f2937;
+    margin: 0;
+    padding: 0;
+    line-height: 1.5;
+  }
+  .header {
+    border-bottom: 3px solid {{ primary_color or '#2563eb' }};
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .header-left h1 {
+    font-size: 22pt;
+    color: {{ primary_color or '#2563eb' }};
+    margin: 0;
+    font-weight: 700;
+  }
+  .header-left .company-name {
+    font-size: 14pt;
+    color: #374151;
+    margin-top: 4px;
+  }
+  .header-right {
+    text-align: right;
+    font-size: 9pt;
+    color: #6b7280;
+  }
+  .title-section {
+    text-align: center;
+    margin-bottom: 25px;
+    border: 2px solid {{ primary_color or '#2563eb' }};
+    padding: 12px;
+    border-radius: 4px;
+  }
+  .title-section h2 {
+    font-size: 18pt;
+    color: {{ primary_color or '#2563eb' }};
+    margin: 0;
+    letter-spacing: 2px;
+  }
+  .title-section .po-number {
+    font-size: 11pt;
+    color: #6b7280;
+    margin-top: 4px;
+  }
+  .info-grid {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 25px;
+  }
+  .info-box {
+    width: 48%;
+    padding: 10px 12px;
+    background: #f9fafb;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+  }
+  .info-box h3 {
+    font-size: 9pt;
+    color: {{ primary_color or '#2563eb' }};
+    margin: 0 0 6px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .info-box p {
+    margin: 2px 0;
+    font-size: 9pt;
+    color: #374151;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 9pt;
+  }
+  table th {
+    background: {{ primary_color or '#2563eb' }};
+    color: #fff;
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  table tr:nth-child(even) td {
+    background: #f9fafb;
+  }
+  table .amount {
+    text-align: right;
+  }
+  table .qty {
+    text-align: center;
+  }
+  .totals {
+    margin-left: auto;
+    width: 300px;
+    border-collapse: collapse;
+    font-size: 9pt;
+  }
+  .totals td {
+    padding: 5px 12px;
+    border: none;
+  }
+  .totals .label {
+    text-align: right;
+    color: #6b7280;
+  }
+  .totals .value {
+    text-align: right;
+    font-weight: 600;
+    width: 100px;
+  }
+  .totals .grand-total td {
+    font-size: 12pt;
+    font-weight: 700;
+    color: {{ primary_color or '#2563eb' }};
+    border-top: 2px solid {{ primary_color or '#2563eb' }};
+    padding-top: 8px;
+  }
+  .terms {
+    margin-top: 25px;
+    padding: 12px;
+    background: #f9fafb;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+  }
+  .terms h3 {
+    font-size: 9pt;
+    color: {{ primary_color or '#2563eb' }};
+    margin: 0 0 6px 0;
+    text-transform: uppercase;
+  }
+  .terms p {
+    font-size: 9pt;
+    color: #6b7280;
+    margin: 0;
+    white-space: pre-wrap;
+  }
+  .signatures {
+    margin-top: 40px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9pt;
+  }
+  .signature-box {
+    width: 40%;
+  }
+  .signature-box .line {
+    border-top: 1px solid #374151;
+    margin-top: 40px;
+    padding-top: 6px;
+    text-align: center;
+    color: #6b7280;
+  }
+  .footer {
+    margin-top: 30px;
+    padding-top: 15px;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+    font-size: 8pt;
+    color: #9ca3af;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>{{ tenant.name }}</h1>
+  </div>
+  <div class="header-right">
+    {{ tenant.address or '' }}<br>
+    {{ tenant.email or '' }}<br>
+    {{ tenant.phone or '' }}<br>
+    {% if tenant.pan_number %}PAN: {{ tenant.pan_number }}{% endif %}
+  </div>
+</div>
+
+<div class="title-section">
+  <h2>PURCHASE ORDER</h2>
+  <div class="po-number">{{ po.po_number }}</div>
+</div>
+
+<div class="info-grid">
+  <div class="info-box">
+    <h3>Vendor</h3>
+    <p><strong>{{ vendor.name }}</strong></p>
+    <p>{{ vendor.address or '' }}</p>
+    <p>{{ vendor.city or '' }}</p>
+    <p>PAN: {{ vendor.pan_number or '—' }}</p>
+    <p>Contact: {{ vendor.contact_person or '' }} | {{ vendor.phone or '' }}</p>
+  </div>
+  <div class="info-box">
+    <h3>Order Details</h3>
+                    <p><span>PO Date:</span> {{ po.created_at.strftime('%Y-%m-%d') }}</p>
+    <p><span>Delivery Date:</span> {{ po.delivery_date or '—' }}</p>
+    <p><span>Delivery To:</span> {{ po.delivery_address or '—' }}</p>
+    <p><span>Payment Terms:</span> {{ po.payment_terms or '—' }}</p>
+    <p><span>Status:</span> {{ po.status | replace('_', ' ') | title }}</p>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:5%">#</th>
+      <th style="width:40%">Description</th>
+      <th style="width:10%" class="qty">Qty</th>
+      <th style="width:10%">Unit</th>
+      <th style="width:15%" class="amount">Rate</th>
+      <th style="width:15%" class="amount">Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in po.items %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ item.description }}</td>
+      <td class="qty">{{ "%.2f"|format(item.quantity) }}</td>
+      <td>{{ item.unit }}</td>
+      <td class="amount">{{ "%.2f"|format(item.unit_rate) }}</td>
+      <td class="amount">{{ "%.2f"|format(item.amount) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<table class="totals">
+  <tr>
+    <td class="label">Total Amount</td>
+    <td class="value">{{ po.currency }} {{ "%.2f"|format(po.total_amount) }}</td>
+  </tr>
+  <tr>
+    <td class="label">VAT (13%)</td>
+    <td class="value">{{ "%.2f"|format(po.tax_amount) }}</td>
+  </tr>
+  <tr class="grand-total">
+    <td class="label"><strong>Grand Total</strong></td>
+    <td class="value"><strong>{{ po.currency }} {{ "%.2f"|format(po.grand_total) }}</strong></td>
+  </tr>
+</table>
+
+<div class="terms">
+  <h3>Terms & Conditions</h3>
+  <p>{{ po.payment_terms or 'Standard payment terms apply.' }}
+{% if po.notes %}
+{{ po.notes }}{% endif %}</p>
+</div>
+
+<div class="signatures">
+  <div class="signature-box">
+    <div class="line">Authorised Signature</div>
+  </div>
+  <div class="signature-box">
+    <div class="line">Vendor Acceptance</div>
+  </div>
+</div>
+
+<div class="footer">
+  This is a computer-generated document. No signature is required.<br>
+  Generated on {{ generated_at }} by CMS Platform
+</div>
+
+</body>
+</html>

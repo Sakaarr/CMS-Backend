@@ -68,6 +68,7 @@ class DPRWorkItemResponse(BaseModel):
     planned_quantity: float
     achieved_quantity: float
     cumulative_quantity: float
+    boq_item_id: str | None = None
     remarks: str | None
     location: str | None
     model_config = {"from_attributes": True}

@@ -135,6 +135,7 @@ class MaterialRequestItem(TenantScopedModel):
     stock_item_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("stock_items.id", ondelete="SET NULL"), nullable=True
     )
+    boq_item_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     material_code: Mapped[str] = mapped_column(String(50), nullable=False)
     description: Mapped[str] = mapped_column(String(255), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
