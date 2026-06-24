@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     app_name: str = "CMS Platform"
     app_env: str = "development"
     app_debug: bool = True
+    sentry_dsn: str = ""
     api_prefix: str = "/api/v1"
     # Storage — S3/MinIO (leave blank to use local disk in dev)
     s3_bucket: str = ""
@@ -47,6 +48,13 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
+
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        if len(v) < 32:
+            raise ValueError("jwt_secret_key must be at least 32 characters long")
+        return v
     # Email (SMTP)
     smtp_host: str = ""
     smtp_port: int = 587
@@ -61,6 +69,8 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
+    cors_methods: str = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    cors_headers: str = "Authorization,Content-Type,X-Tenant-Slug,X-Request-ID"
 
     @field_validator("cors_origins", mode="before")
     @classmethod
