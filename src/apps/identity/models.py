@@ -103,6 +103,7 @@ class UserPermission(TenantScopedModel):
     can_finance: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     can_quality: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     can_documents: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_subcontractors: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Relationships
     user: Mapped["User"] = relationship(lazy="select")

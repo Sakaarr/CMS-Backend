@@ -130,6 +130,7 @@ class UserPermissionSchema(BaseModel):
     can_finance: bool = False
     can_quality: bool = False
     can_documents: bool = False
+    can_subcontractors: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -154,41 +155,41 @@ ROLE_DEFAULT_PERMISSIONS: dict[UserRole, dict] = {
     UserRole.SUPER_ADMIN: {
         "can_projects": True, "can_boq": True, "can_procurement": True,
         "can_inventory": True, "can_site_ops": True, "can_finance": True,
-        "can_quality": True, "can_documents": True,
+        "can_quality": True, "can_documents": True, "can_subcontractors": True,
     },
     UserRole.COMPANY_ADMIN: {
         "can_projects": True, "can_boq": True, "can_procurement": True,
         "can_inventory": True, "can_site_ops": True, "can_finance": True,
-        "can_quality": True, "can_documents": True,
+        "can_quality": True, "can_documents": True, "can_subcontractors": True,
     },
     UserRole.PROJECT_MANAGER: {
         "can_projects": True, "can_boq": True, "can_procurement": True,
         "can_inventory": True, "can_site_ops": True, "can_finance": False,
-        "can_quality": True, "can_documents": True,
+        "can_quality": True, "can_documents": True, "can_subcontractors": False,
     },
     UserRole.SITE_ENGINEER: {
         "can_projects": True, "can_boq": False, "can_procurement": False,
         "can_inventory": True, "can_site_ops": True, "can_finance": False,
-        "can_quality": True, "can_documents": True,
+        "can_quality": True, "can_documents": True, "can_subcontractors": False,
     },
     UserRole.FINANCE: {
         "can_projects": True, "can_boq": True, "can_procurement": True,
         "can_inventory": False, "can_site_ops": False, "can_finance": True,
-        "can_quality": False, "can_documents": True,
+        "can_quality": False, "can_documents": True, "can_subcontractors": False,
     },
     UserRole.PROCUREMENT: {
         "can_projects": True, "can_boq": False, "can_procurement": True,
         "can_inventory": True, "can_site_ops": False, "can_finance": False,
-        "can_quality": False, "can_documents": True,
+        "can_quality": False, "can_documents": True, "can_subcontractors": False,
     },
     UserRole.QA_OFFICER: {
         "can_projects": True, "can_boq": False, "can_procurement": False,
         "can_inventory": False, "can_site_ops": True, "can_finance": False,
-        "can_quality": True, "can_documents": True,
+        "can_quality": True, "can_documents": True, "can_subcontractors": False,
     },
     UserRole.VIEWER: {
         "can_projects": True, "can_boq": False, "can_procurement": False,
         "can_inventory": False, "can_site_ops": False, "can_finance": False,
-        "can_quality": False, "can_documents": False,
+        "can_quality": False, "can_documents": False, "can_subcontractors": False,
     },
 }

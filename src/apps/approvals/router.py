@@ -26,6 +26,7 @@ def _full_access_permissions() -> UserPermissionSchema:
         can_finance=True,
         can_quality=True,
         can_documents=True,
+        can_subcontractors=True,
     )
 
 
@@ -71,6 +72,7 @@ async def _resolve_permissions(
             can_finance=False,
             can_quality=False,
             can_documents=False,
+            can_subcontractors=False,
         )
     return tenant.id, UserPermissionSchema.model_validate(perms)
 

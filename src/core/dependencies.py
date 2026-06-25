@@ -55,6 +55,7 @@ MODULE_PERMISSION_MAP = {
     "finance": "can_finance",
     "quality": "can_quality",
     "documents": "can_documents",
+    "subcontractors": "can_subcontractors",
 }
 
 
