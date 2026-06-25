@@ -5,11 +5,14 @@ Revises:
 Create Date: 2026-05-01 00:59:56.534669
 
 """
+import os
+import sys
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy_utils import database_exists
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from src.core.database import Base
 

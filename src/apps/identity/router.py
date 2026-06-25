@@ -228,7 +228,7 @@ async def get_my_permissions(
         return success_response(data=UserPermissionSchema(
             can_projects=True, can_boq=True, can_procurement=True,
             can_inventory=True, can_site_ops=True, can_finance=True,
-            can_quality=True, can_documents=True,
+            can_quality=True, can_documents=True, can_subcontractors=True,
         ))
 
     tenant_result = await db.execute(
@@ -241,7 +241,7 @@ async def get_my_permissions(
         return success_response(data=UserPermissionSchema(
             can_projects=True, can_boq=True, can_procurement=True,
             can_inventory=True, can_site_ops=True, can_finance=True,
-            can_quality=True, can_documents=True,
+            can_quality=True, can_documents=True, can_subcontractors=True,
         ))
 
     # Superadmin and company_admin get everything
@@ -249,7 +249,7 @@ async def get_my_permissions(
         return success_response(data=UserPermissionSchema(
             can_projects=True, can_boq=True, can_procurement=True,
             can_inventory=True, can_site_ops=True, can_finance=True,
-            can_quality=True, can_documents=True,
+            can_quality=True, can_documents=True, can_subcontractors=True,
         ))
 
     # Check if company_admin
@@ -267,7 +267,7 @@ async def get_my_permissions(
         return success_response(data=UserPermissionSchema(
             can_projects=True, can_boq=True, can_procurement=True,
             can_inventory=True, can_site_ops=True, can_finance=True,
-            can_quality=True, can_documents=True,
+            can_quality=True, can_documents=True, can_subcontractors=True,
         ))
 
     svc = UserManagementService(
@@ -279,7 +279,7 @@ async def get_my_permissions(
         return success_response(data=UserPermissionSchema(
             can_projects=True, can_boq=False, can_procurement=False,
             can_inventory=False, can_site_ops=False, can_finance=False,
-            can_quality=False, can_documents=False,
+            can_quality=False, can_documents=False, can_subcontractors=False,
         ))
 
     return success_response(data=UserPermissionSchema.model_validate(perms))

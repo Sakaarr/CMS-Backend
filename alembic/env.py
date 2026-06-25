@@ -1,9 +1,14 @@
 import asyncio
+import os
+import sys
 from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
+
+# Ensure the repo root is on sys.path when Alembic runs from the alembic/ folder.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.core.config import settings
 from src.core.database import Base
@@ -38,6 +43,8 @@ from src.apps.quality.models import (
     SafetyIncident, PunchListItem,
 )
 from src.apps.documents.models import Document, DocumentApproval, DocumentRevision
+from src.apps.subcontractors.models import Subcontractor, SubcontractorContract, WorkOrder
+from src.apps.comments.models import Comment
 from src.apps.notifications.models import DeviceToken
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)
