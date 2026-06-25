@@ -4,6 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.apps.identity.models import User, UserPermission, OrganizationMember
 from src.core.email import send_email
 from src.core.config import settings
+from src.apps.notifications.service import (
+    PushNotificationService,
+    send_push_notification,
+)
+from src.apps.tenancy.models import Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -151,22 +156,44 @@ async def notify_user_by_id(
     subject: str,
     html_body: str,
 ) -> bool:
-    """Send email to a specific user by their ID."""
+    """Send email and push notification to a specific user by their ID."""
     if not user_id:
         return False
     result = await db.execute(
-        select(User.email).where(
+        select(User.email, User.id).where(
             User.id == user_id,
             User.is_active.is_(True),
         )
     )
-    email = result.scalar_one_or_none()
-    if not email:
+    row = result.one_or_none()
+    if not row:
         logger.info(f"User {user_id} not found or inactive")
         return False
+
+    email = row[0]
     try:
         send_email(email, subject, html_body)
-        return True
     except Exception as e:
-        logger.error(f"Failed to notify user {user_id}: {e}")
-        return False
+        logger.error(f"Failed to email user {user_id}: {e}")
+
+    try:
+
+
+        t_result = await db.execute(
+            select(Tenant.id).join(
+                User, User.tenant_id == Tenant.id
+            ).where(User.id == user_id)
+        )
+        tenant_row = t_result.first()
+        if tenant_row:
+            svc = PushNotificationService(db=db, tenant_id=tenant_row[0])
+            tokens = await svc.get_tokens_for_user(user_id)
+            if tokens:
+                import re as _re
+
+                clean_body = _re.sub(r"<[^>]+>", "", html_body)[:200]
+                await send_push_notification(tokens, subject, clean_body)
+    except Exception as e:
+        logger.debug(f"Push notification skipped: {e}")
+
+    return True

@@ -45,6 +45,7 @@ from src.apps.quality.models import (
 from src.apps.documents.models import Document, DocumentApproval, DocumentRevision
 from src.apps.subcontractors.models import Subcontractor, SubcontractorContract, WorkOrder
 from src.apps.comments.models import Comment
+from src.apps.notifications.models import DeviceToken
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)
 
