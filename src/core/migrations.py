@@ -23,6 +23,9 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE toolbox_talks ADD COLUMN IF NOT EXISTS subcontractor_id VARCHAR(36) REFERENCES subcontractors(id) ON DELETE SET NULL",
     "ALTER TABLE safety_violations ADD COLUMN IF NOT EXISTS subcontractor_id VARCHAR(36) REFERENCES subcontractors(id) ON DELETE SET NULL",
     "ALTER TABLE safety_observations ADD COLUMN IF NOT EXISTS subcontractor_id VARCHAR(36) REFERENCES subcontractors(id) ON DELETE SET NULL",
+    # Portal — subcontractor users table (created by create_all, but ensure FK)
+    "ALTER TABLE subcontractor_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE",
+    "ALTER TABLE subcontractor_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
 ]
 
 
