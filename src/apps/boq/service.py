@@ -11,7 +11,7 @@ from src.apps.boq.schemas import (
     CreateBOQItemRequest, UpdateBOQItemRequest,
     CreateRateAnalysisRequest,
 )
-from src.core.exceptions import NotFoundError, ConflictError, ValidationError
+from src.core.exceptions import NotFoundError, ConflictError, ValidationError, DependencyError
 
 from src.core.notifications import NotificationService
 
@@ -21,6 +21,7 @@ from src.core.email_templates import (
     item_approved_html, notify_user_by_id,
 )
 from src.apps.boq.models import UnitOfMeasure
+from src.apps.subcontractors.models import SubcontractorBOQItem, BOQItemAssignmentStatus
 import logging
 import openpyxl
 import io
@@ -278,6 +279,23 @@ class BOQService:
         if bv.status == BudgetVersionStatus.APPROVED:
             raise ValidationError("Cannot modify items in an approved budget version")
 
+        # Check for active subcontractor assignments that would be affected by qty/rate changes
+        if data.quantity is not None or data.unit_rate is not None:
+            assignment_check = await self.db.execute(
+                select(func.count()).select_from(SubcontractorBOQItem).where(and_(
+                    SubcontractorBOQItem.boq_item_id == item_id,
+                    SubcontractorBOQItem.deleted_at.is_(None),
+                    SubcontractorBOQItem.status != BOQItemAssignmentStatus("cancelled"),
+                ))
+            )
+            if assignment_check.scalar_one() > 0:
+                raise DependencyError(
+                    f"Cannot modify quantity or rate of BOQ item '{item.item_number}': "
+                    "it has active subcontractor assignments. "
+                    "Cancel or remove the assignments first, or create a new budget version.",
+                    error_code="HAS_SUBCONTRACTOR_ASSIGNMENTS",
+                )
+
         updates = data.model_dump(exclude_none=True)
         for k, v in updates.items():
             setattr(item, k, v)
@@ -295,6 +313,22 @@ class BOQService:
         bv = await self.get_budget_version(item.budget_version_id)
         if bv.status == BudgetVersionStatus.APPROVED:
             raise ValidationError("Cannot delete items from an approved budget version")
+
+        # Check for active subcontractor assignments
+        assignment_check = await self.db.execute(
+            select(func.count()).select_from(SubcontractorBOQItem).where(and_(
+                SubcontractorBOQItem.boq_item_id == item_id,
+                SubcontractorBOQItem.deleted_at.is_(None),
+            ))
+        )
+        if assignment_check.scalar_one() > 0:
+            raise DependencyError(
+                f"Cannot delete BOQ item '{item.item_number}': "
+                "it has subcontractor assignments. Remove all assignments first, "
+                "or create a new budget version.",
+                error_code="HAS_SUBCONTRACTOR_ASSIGNMENTS",
+            )
+
         from datetime import datetime, timezone
         item.deleted_at = datetime.now(timezone.utc)
         await self.db.flush()

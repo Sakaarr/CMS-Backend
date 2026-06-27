@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, func, select
 from src.core.database import get_db
 from src.apps.identity.dependencies import get_current_user
 from src.apps.identity.models import User
 from src.apps.tenancy.models import Tenant
 from src.apps.projects.dependencies import get_current_tenant
 from src.apps.subcontractors.service import SubcontractorService
-from src.apps.subcontractors.models import SubcontractorStatus, ContractStatus, WorkOrderStatus
+from src.apps.subcontractors.models import SubcontractorStatus, ContractStatus, WorkOrderStatus, SubcontractorBOQItem
 from src.apps.subcontractors.schemas import (
     CreateSubcontractorRequest, UpdateSubcontractorRequest,
     SubcontractorResponse, SubcontractorSummary,
@@ -14,6 +15,10 @@ from src.apps.subcontractors.schemas import (
     ContractResponse, ContractSummary,
     CreateWorkOrderRequest, UpdateWorkOrderRequest,
     WorkOrderResponse, WorkOrderSummary,
+    AssignBOQItemsRequest, SubcontractorBOQItemResponse,
+    UpdateBOQItemAssignmentRequest,
+    SubcontractorContractDetail, ProjectSubcontractorResponse,
+    SubcontractorBOQItemDetail, SubcontractorWorkloadResponse,
 )
 from src.shared.response import APIResponse, PaginatedResponse, success_response, paginated_response
 from src.core.dependencies import require_module
@@ -124,6 +129,15 @@ async def update_contract(
     return success_response(data=ContractResponse.model_validate(contract), message="Contract updated")
 
 
+@router.delete("/contracts/{contract_id}", response_model=APIResponse[None])
+async def delete_contract(
+    contract_id: str,
+    svc: SubcontractorService = Depends(get_svc),
+):
+    await svc.delete_contract(contract_id)
+    return success_response(message="Contract deleted")
+
+
 @router.post("/projects/{project_id}/work-orders", response_model=APIResponse[WorkOrderResponse], status_code=201)
 async def create_work_order(
     project_id: str, data: CreateWorkOrderRequest,
@@ -166,3 +180,194 @@ async def update_work_order(
 ):
     wo = await svc.update_work_order(work_order_id, data)
     return success_response(data=WorkOrderResponse.model_validate(wo), message="Work order updated")
+
+
+# ── BOQ Item Assignment ───────────────────────────────────────────────
+
+
+@router.post(
+    "/contracts/{contract_id}/boq-items",
+    response_model=APIResponse[list[SubcontractorBOQItemResponse]],
+    status_code=201,
+)
+async def assign_boq_items(
+    contract_id: str, data: AssignBOQItemsRequest,
+    svc: SubcontractorService = Depends(get_svc),
+):
+    items = await svc.assign_boq_items(contract_id, data)
+    return success_response(
+        data=[SubcontractorBOQItemResponse.model_validate(i) for i in items],
+        message="BOQ items assigned",
+    )
+
+
+@router.get(
+    "/contracts/{contract_id}/boq-items",
+    response_model=PaginatedResponse[SubcontractorBOQItemDetail],
+)
+async def list_boq_assignments(
+    contract_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    svc: SubcontractorService = Depends(get_svc),
+):
+    skip = (page - 1) * page_size
+    items_with_details = await svc.get_boq_items_with_details(
+        contract_id, skip=skip, limit=page_size,
+    )
+    total = len(items_with_details)
+    return paginated_response(
+        data=[SubcontractorBOQItemDetail(**i) for i in items_with_details],
+        total=total, page=page, page_size=page_size,
+    )
+
+
+@router.patch(
+    "/boq-item-assignments/{assignment_id}",
+    response_model=APIResponse[SubcontractorBOQItemResponse],
+)
+async def update_boq_assignment(
+    assignment_id: str, data: UpdateBOQItemAssignmentRequest,
+    svc: SubcontractorService = Depends(get_svc),
+):
+    item = await svc.update_boq_item_assignment(assignment_id, data)
+    return success_response(
+        data=SubcontractorBOQItemResponse.model_validate(item),
+        message="Assignment updated",
+    )
+
+
+@router.delete(
+    "/boq-item-assignments/{assignment_id}",
+    response_model=APIResponse[None],
+)
+async def delete_boq_assignment(
+    assignment_id: str,
+    svc: SubcontractorService = Depends(get_svc),
+):
+    await svc.delete_boq_item_assignment(assignment_id)
+    return success_response(message="Assignment removed")
+
+
+# ── Project & Subcontractor Queries ────────────────────────────────────
+
+
+@router.get(
+    "/subcontractors/{subcontractor_id}/projects",
+    response_model=PaginatedResponse[SubcontractorContractDetail],
+)
+async def get_subcontractor_projects(
+    subcontractor_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    svc: SubcontractorService = Depends(get_svc),
+):
+    contracts, total = await svc.get_subcontractor_projects(subcontractor_id)
+    return paginated_response(
+        data=[SubcontractorContractDetail.model_validate(c) for c in contracts],
+        total=total, page=page, page_size=page_size,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/subcontractors",
+    response_model=PaginatedResponse[ProjectSubcontractorResponse],
+)
+async def get_project_subcontractors(
+    project_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    svc: SubcontractorService = Depends(get_svc),
+):
+    contracts, total = await svc.get_project_subcontractors(project_id)
+
+    result = []
+    for c in contracts:
+        # Count BOQ items for this contract
+        boq_count_result = await svc.db.execute(
+            select(func.count()).select_from(SubcontractorBOQItem)
+            .where(and_(
+                SubcontractorBOQItem.contract_id == c.id,
+                SubcontractorBOQItem.deleted_at.is_(None),
+            ))
+        )
+        boq_count = boq_count_result.scalar_one()
+
+        boq_amount_result = await svc.db.execute(
+            select(func.coalesce(func.sum(SubcontractorBOQItem.contract_amount), 0))
+            .where(and_(
+                SubcontractorBOQItem.contract_id == c.id,
+                SubcontractorBOQItem.deleted_at.is_(None),
+            ))
+        )
+        boq_amount = boq_amount_result.scalar_one()
+
+        result.append(ProjectSubcontractorResponse(
+            contract_id=c.id,
+            contract_number=c.contract_number,
+            contract_title=c.title,
+            contract_status=c.status,
+            contract_value=c.contract_value,
+            currency=c.currency,
+            scope_of_work=c.scope_of_work,
+            start_date=c.start_date,
+            end_date=c.end_date,
+            retention_percentage=c.retention_percentage,
+            subcontractor_id=c.subcontractor_id,
+            subcontractor_name=c.subcontractor.name if c.subcontractor else "",
+            subcontractor_specialty=c.subcontractor.specialty.value if c.subcontractor else "",
+            boq_items_count=boq_count,
+            boq_items_total_amount=float(boq_amount or 0),
+        ))
+
+    return paginated_response(
+        data=result, total=total, page=page, page_size=page_size,
+    )
+
+
+# ── Dashboard / Workload ──────────────────────────────────────────────
+
+
+@router.get(
+    "/subcontractors/{subcontractor_id}/workload",
+    response_model=APIResponse[SubcontractorWorkloadResponse],
+)
+async def get_subcontractor_workload(
+    subcontractor_id: str,
+    svc: SubcontractorService = Depends(get_svc),
+):
+    from src.apps.projects.models import Project
+
+    workload = await svc.get_subcontractor_workload(subcontractor_id)
+
+    # Get detailed contracts
+    contracts, _ = await svc.get_subcontractor_projects(subcontractor_id)
+    contract_details = []
+    for c in contracts:
+        project_result = await svc.db.execute(
+            select(Project).where(Project.id == c.project_id)
+        )
+        project = project_result.scalar_one_or_none()
+        contract_details.append(SubcontractorContractDetail(
+            id=c.id,
+            project_id=c.project_id,
+            contract_number=c.contract_number,
+            title=c.title,
+            status=c.status,
+            contract_value=c.contract_value,
+            currency=c.currency,
+            scope_of_work=c.scope_of_work,
+            start_date=c.start_date,
+            end_date=c.end_date,
+            retention_percentage=c.retention_percentage,
+            created_at=c.created_at,
+        ))
+
+    sub = await svc.get(subcontractor_id)
+    workload["subcontractor_name"] = sub.name
+    workload["contracts"] = contract_details
+
+    return success_response(
+        data=SubcontractorWorkloadResponse(**workload),
+        message="Workload retrieved",
+    )

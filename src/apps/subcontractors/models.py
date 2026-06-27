@@ -38,6 +38,13 @@ class WorkOrderStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+class BOQItemAssignmentStatus(str, enum.Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
 class Subcontractor(TenantScopedModel):
     __tablename__ = "subcontractors"
 
@@ -119,3 +126,28 @@ class WorkOrder(TenantScopedModel):
     actual_end: Mapped[str | None] = mapped_column(Date, nullable=True)
     assigned_to: Mapped[str | None] = mapped_column(String(36), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    contract: Mapped["SubcontractorContract"] = relationship(lazy="select")
+
+
+class SubcontractorBOQItem(TenantScopedModel):
+    __tablename__ = "subcontractor_boq_items"
+
+    contract_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("subcontractor_contracts.id", ondelete="CASCADE"),
+        nullable=False, index=True
+    )
+    boq_item_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("boq_items.id", ondelete="CASCADE"),
+        nullable=False, index=True
+    )
+    assigned_quantity: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    unit_rate: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    contract_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    status: Mapped[BOQItemAssignmentStatus] = mapped_column(
+        SAEnum(BOQItemAssignmentStatus), default=BOQItemAssignmentStatus.PENDING, nullable=False
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    contract: Mapped["SubcontractorContract"] = relationship(lazy="select")

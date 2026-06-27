@@ -64,6 +64,7 @@ async def submit_dpr(dpr_id: str, svc: SiteOpsService = Depends(get_svc)):
     return success_response(data=DPRResponse.model_validate(dpr), message="DPR submitted")
 
 
+@router.get("/projects/{project_id}/dprs/summary", response_model=APIResponse[dict])
 @router.get("/projects/{project_id}/site-ops-summary", response_model=APIResponse[dict])
 async def site_ops_summary(project_id: str, svc: SiteOpsService = Depends(get_svc)):
     summary = await svc.get_site_ops_summary(project_id)
