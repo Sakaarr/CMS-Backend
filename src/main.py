@@ -31,6 +31,7 @@ from src.apps.progress.router import router as progress_router
 from src.apps.compliance.router import router as compliance_router
 from src.apps.comments.router import router as comments_router
 from src.apps.notifications.router import router as notifications_router
+from src.apps.portal.router import router as portal_router
 
 setup_logging(settings.app_env)
 from src.core.sentry import init_sentry
@@ -142,6 +143,7 @@ app.include_router(progress_router, prefix=settings.api_prefix)
 app.include_router(compliance_router, prefix=settings.api_prefix)
 app.include_router(comments_router, prefix=settings.api_prefix)
 app.include_router(notifications_router, prefix=settings.api_prefix)
+app.include_router(portal_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(user_router, prefix=settings.api_prefix)
 

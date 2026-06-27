@@ -579,9 +579,9 @@ class FinanceService:
             previous_payments=data.previous_payments,
             net_payable=net,
             notes=data.notes,
-            issued_by=self.user_id,
             tenant_id=self.tenant_id,
             created_by=self.user_id,
+            issued_by=self.user_id,
         )
         self.db.add(cert)
         await self.db.flush()
