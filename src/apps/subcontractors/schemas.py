@@ -191,3 +191,62 @@ class WorkOrderSummary(BaseModel):
     scheduled_start: date | None
     scheduled_end: date | None
     model_config = {"from_attributes": True}
+
+
+class AssignBOQItemRequest(BaseModel):
+    boq_item_id: str
+    assigned_quantity: float = 0.0
+    unit_rate: float = 0.0
+    contract_amount: float = 0.0
+
+
+class AssignBOQItemsRequest(BaseModel):
+    items: list[AssignBOQItemRequest]
+
+
+class AssignedBOQItemResponse(BaseModel):
+    id: str
+    contract_id: str
+    boq_item_id: str
+    assigned_quantity: float
+    unit_rate: float
+    contract_amount: float
+    status: str
+    notes: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ContractBOQItemResponse(BaseModel):
+    id: str
+    boq_item_id: str
+    item_number: str
+    description: str
+    unit: str
+    boq_quantity: float
+    boq_unit_rate: float
+    assigned_quantity: float
+    unit_rate: float
+    contract_amount: float
+    status: str
+    notes: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectSubcontractorResponse(BaseModel):
+    contract_id: str
+    contract_number: str
+    contract_title: str
+    contract_status: ContractStatus
+    contract_value: float
+    currency: str
+    scope_of_work: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    retention_percentage: float = 0.0
+    subcontractor_id: str
+    subcontractor_name: str
+    subcontractor_specialty: str
+    boq_items_count: int = 0
+    boq_items_total_amount: float = 0.0

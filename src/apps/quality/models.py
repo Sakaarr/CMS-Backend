@@ -4,6 +4,41 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.shared.base_model import TenantScopedModel
 
 
+class ViolationSeverity(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class ViolationStatus(str, enum.Enum):
+    REPORTED = "reported"
+    ACKNOWLEDGED = "acknowledged"
+    UNDER_INVESTIGATION = "under_investigation"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+
+
+class ObservationType(str, enum.Enum):
+    SAFE = "safe"
+    UNSAFE = "unsafe"
+    HAZARD = "hazard"
+    GOOD_PRACTICE = "good_practice"
+
+
+class ObservationStatus(str, enum.Enum):
+    OPEN = "open"
+    ACKNOWLEDGED = "acknowledged"
+    ACTIONED = "actioned"
+    CLOSED = "closed"
+
+
+class TalkStatus(str, enum.Enum):
+    SCHEDULED = "scheduled"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
 class InspectionStatus(str, enum.Enum):
     SCHEDULED = "scheduled"
     IN_PROGRESS = "in_progress"
@@ -79,6 +114,9 @@ class Inspection(TenantScopedModel):
     site_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("sites.id", ondelete="SET NULL"), nullable=True
     )
+    subcontractor_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("subcontractors.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     inspection_number: Mapped[str] = mapped_column(String(50), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     inspection_type: Mapped[InspectionType] = mapped_column(
@@ -134,6 +172,9 @@ class NCR(TenantScopedModel):
     site_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("sites.id", ondelete="SET NULL"), nullable=True
     )
+    subcontractor_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("subcontractors.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     inspection_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("inspections.id", ondelete="SET NULL"), nullable=True
     )
@@ -168,6 +209,9 @@ class SafetyIncident(TenantScopedModel):
     )
     site_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("sites.id", ondelete="SET NULL"), nullable=True
+    )
+    subcontractor_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("subcontractors.id", ondelete="SET NULL"), nullable=True, index=True
     )
     incident_number: Mapped[str] = mapped_column(String(50), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -204,6 +248,9 @@ class PunchListItem(TenantScopedModel):
     site_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("sites.id", ondelete="SET NULL"), nullable=True
     )
+    subcontractor_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("subcontractors.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     inspection_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("inspections.id", ondelete="SET NULL"), nullable=True
     )
@@ -219,3 +266,100 @@ class PunchListItem(TenantScopedModel):
     verified_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     remarks: Mapped[str | None] = mapped_column(String(255), nullable=True)
     priority: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
+
+
+class ToolboxTalk(TenantScopedModel):
+    __tablename__ = "toolbox_talks"
+
+    project_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False, index=True
+    )
+    site_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("sites.id", ondelete="SET NULL"), nullable=True
+    )
+    subcontractor_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("subcontractors.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    talk_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    topic: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[TalkStatus] = mapped_column(
+        SAEnum(TalkStatus), default=TalkStatus.SCHEDULED, nullable=False
+    )
+    scheduled_date: Mapped[str] = mapped_column(Date, nullable=False)
+    completed_date: Mapped[str | None] = mapped_column(Date, nullable=True)
+    conducted_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    attendees_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    topics_covered: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_safety_topic: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class SafetyViolation(TenantScopedModel):
+    __tablename__ = "safety_violations"
+
+    project_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False, index=True
+    )
+    site_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("sites.id", ondelete="SET NULL"), nullable=True
+    )
+    subcontractor_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("subcontractors.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    violation_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[ViolationSeverity] = mapped_column(
+        SAEnum(ViolationSeverity), default=ViolationSeverity.MEDIUM, nullable=False
+    )
+    status: Mapped[ViolationStatus] = mapped_column(
+        SAEnum(ViolationStatus), default=ViolationStatus.REPORTED, nullable=False
+    )
+    violation_date: Mapped[str] = mapped_column(Date, nullable=False)
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    regulation_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reported_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    assigned_to: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    corrective_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    closed_date: Mapped[str | None] = mapped_column(Date, nullable=True)
+    penalty_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    evidence_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SafetyObservation(TenantScopedModel):
+    __tablename__ = "safety_observations"
+
+    project_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False, index=True
+    )
+    site_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("sites.id", ondelete="SET NULL"), nullable=True
+    )
+    subcontractor_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("subcontractors.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    observation_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    observation_type: Mapped[ObservationType] = mapped_column(
+        SAEnum(ObservationType), nullable=False
+    )
+    status: Mapped[ObservationStatus] = mapped_column(
+        SAEnum(ObservationStatus), default=ObservationStatus.OPEN, nullable=False
+    )
+    observation_date: Mapped[str] = mapped_column(Date, nullable=False)
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    observed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    assigned_to: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    action_taken: Mapped[str | None] = mapped_column(Text, nullable=True)
+    closed_date: Mapped[str | None] = mapped_column(Date, nullable=True)
+    is_positive: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    evidence_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)

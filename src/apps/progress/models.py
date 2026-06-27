@@ -79,6 +79,9 @@ class SubcontractorCertificate(TenantScopedModel):
     amount_due: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     approved_at: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invoice_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     revision_number: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)

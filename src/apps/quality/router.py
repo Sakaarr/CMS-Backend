@@ -225,3 +225,14 @@ async def update_punch_item(
 async def quality_summary(project_id: str, svc: QualityService = Depends(get_svc)):
     summary = await svc.get_quality_summary(project_id)
     return success_response(data=summary)
+
+
+@router.get("/projects/{project_id}/safety-metrics",
+    response_model=APIResponse[dict])
+async def safety_metrics(
+    project_id: str,
+    subcontractor_id: str | None = Query(None),
+    svc: QualityService = Depends(get_svc),
+):
+    metrics = await svc.get_safety_metrics(project_id, subcontractor_id)
+    return success_response(data=metrics)

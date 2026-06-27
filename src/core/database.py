@@ -43,6 +43,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def create_all_tables():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        from src.core.migrations import run_migrations
+        await run_migrations(conn)
 
 async def drop_all_tables():
     async with engine.begin() as conn:
