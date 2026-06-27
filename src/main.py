@@ -27,6 +27,7 @@ from src.apps.approvals.router import router as approvals_router
 from src.apps.reports.router import router as reports_router
 from src.apps.dashboard.router import router as dashboard_router
 from src.apps.subcontractors.router import router as subcontractors_router
+from src.apps.progress.router import router as progress_router
 from src.apps.comments.router import router as comments_router
 from src.apps.notifications.router import router as notifications_router
 
@@ -136,6 +137,7 @@ app.include_router(approvals_router, prefix=settings.api_prefix)
 app.include_router(reports_router, prefix=settings.api_prefix)
 app.include_router(dashboard_router, prefix=settings.api_prefix)
 app.include_router(subcontractors_router, prefix=settings.api_prefix)
+app.include_router(progress_router, prefix=settings.api_prefix)
 app.include_router(comments_router, prefix=settings.api_prefix)
 app.include_router(notifications_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)
