@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, case
-from src.apps.identity.models import User
+from sqlalchemy import select, and_, func, case, text, String
+from sqlalchemy.types import DateTime
+from src.apps.identity.models import User, OrganizationMember
 from src.apps.projects.models import Project, ProjectStatus
 from src.apps.procurement.models import PurchaseOrder, POStatus
 from src.apps.finance.models import Invoice, InvoiceStatus, Expense
@@ -9,6 +10,7 @@ from src.apps.site_ops.models import DailyProgressReport
 from src.apps.quality.models import Inspection, NCR, SafetyIncident
 from src.apps.documents.models import Document, DocumentApproval, ApprovalStatus
 from src.apps.boq.models import BudgetVersion, BudgetVersionStatus, BOQItem
+from src.apps.tenancy.models import Tenant
 from src.core.config import settings
 
 
@@ -620,3 +622,296 @@ class DashboardService:
             "procurement": round(scores[3], 1) if len(scores) > 3 else 0,
             "safety": round(scores[4], 1) if len(scores) > 4 else 0,
         }
+
+
+class SuperAdminDashboardService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_overview(self) -> dict:
+        tenant_stats = await self._tenant_stats()
+        plan_distribution = await self._plan_distribution()
+        monthly_signups = await self._monthly_tenant_signups()
+        tenant_user_counts = await self._tenant_user_counts()
+        tenant_project_counts = await self._tenant_project_counts()
+        total_users = await self._total_users()
+        total_projects = await self._total_projects()
+        total_revenue = await self._total_revenue()
+        recent_tenants = await self._recent_tenants()
+        top_tenants_by_revenue = await self._top_tenants_by_revenue()
+
+        return {
+            "tenant_stats": tenant_stats,
+            "plan_distribution": plan_distribution,
+            "monthly_signups": monthly_signups,
+            "tenant_user_counts": tenant_user_counts,
+            "tenant_project_counts": tenant_project_counts,
+            "total_users": total_users,
+            "total_projects": total_projects,
+            "total_revenue": total_revenue,
+            "recent_tenants": recent_tenants,
+            "top_tenants_by_revenue": top_tenants_by_revenue,
+        }
+
+    async def get_tenant_detail(self, tenant_id: str) -> dict:
+        from src.apps.tenancy.service import TenantService
+        ts = TenantService(self.db)
+        tenant = await ts.get_by_id(tenant_id)
+        if not tenant:
+            return {}
+
+        user_count = await self.db.execute(
+            select(func.count(OrganizationMember.id))
+            .where(and_(
+                OrganizationMember.tenant_id == tenant_id,
+                OrganizationMember.deleted_at.is_(None),
+            ))
+        )
+
+        project_count = await self.db.execute(
+            select(func.count(Project.id))
+            .where(and_(
+                Project.tenant_id == tenant_id,
+                Project.deleted_at.is_(None),
+            ))
+        )
+
+        total_invoiced = await self.db.execute(
+            select(func.coalesce(func.sum(Invoice.grand_total), 0))
+            .where(and_(
+                Invoice.tenant_id == tenant_id,
+                Invoice.deleted_at.is_(None),
+            ))
+        )
+
+        total_paid = await self.db.execute(
+            select(func.coalesce(func.sum(Invoice.paid_amount), 0))
+            .where(and_(
+                Invoice.tenant_id == tenant_id,
+                Invoice.deleted_at.is_(None),
+            ))
+        )
+
+        projects_result = await self.db.execute(
+            select(
+                Project.status,
+                func.count(Project.id).label("count"),
+            )
+            .where(and_(
+                Project.tenant_id == tenant_id,
+                Project.deleted_at.is_(None),
+            ))
+            .group_by(Project.status)
+        )
+
+        users_result = await self.db.execute(
+            select(User.full_name, User.email, User.is_active, OrganizationMember.role)
+            .join(OrganizationMember, OrganizationMember.user_id == User.id)
+            .where(and_(
+                OrganizationMember.tenant_id == tenant_id,
+                OrganizationMember.deleted_at.is_(None),
+                User.deleted_at.is_(None),
+            ))
+            .order_by(User.created_at.desc())
+        )
+
+        return {
+            "tenant": {
+                "id": tenant.id,
+                "name": tenant.name,
+                "slug": tenant.slug,
+                "status": tenant.status.value if hasattr(tenant.status, "value") else str(tenant.status),
+                "plan": tenant.plan.value if hasattr(tenant.plan, "value") else str(tenant.plan),
+                "email": tenant.email,
+                "phone": tenant.phone,
+                "address": tenant.address,
+                "country": tenant.country,
+                "currency": tenant.currency,
+                "pan_number": tenant.pan_number,
+                "vat_number": tenant.vat_number,
+                "logo_url": tenant.logo_url,
+                "is_active": tenant.is_active,
+                "max_projects": tenant.max_projects,
+                "max_users": tenant.max_users,
+                "created_at": str(tenant.created_at) if tenant.created_at else None,
+            },
+            "user_count": user_count.scalar_one() or 0,
+            "project_count": project_count.scalar_one() or 0,
+            "total_invoiced": round(total_invoiced.scalar_one() or 0, 2),
+            "total_paid": round(total_paid.scalar_one() or 0, 2),
+            "projects_by_status": {
+                str(r.status): r.count for r in projects_result.all()
+            },
+            "users": [
+                {
+                    "full_name": r.full_name,
+                    "email": r.email,
+                    "is_active": r.is_active,
+                    "role": r.role.value if hasattr(r.role, "value") else str(r.role),
+                }
+                for r in users_result.all()
+            ],
+        }
+
+    async def _tenant_stats(self) -> dict:
+        result = await self.db.execute(
+            select(
+                Tenant.status,
+                func.count(Tenant.id).label("count"),
+            )
+            .where(Tenant.deleted_at.is_(None))
+            .group_by(Tenant.status)
+        )
+        rows = result.all()
+        by_status = {str(r.status): r.count for r in rows}
+        total = sum(by_status.values())
+        return {
+            "total": total,
+            "by_status": by_status,
+        }
+
+    async def _plan_distribution(self) -> list[dict]:
+        result = await self.db.execute(
+            select(
+                Tenant.plan,
+                func.count(Tenant.id).label("count"),
+            )
+            .where(Tenant.deleted_at.is_(None))
+            .group_by(Tenant.plan)
+            .order_by(func.count(Tenant.id).desc())
+        )
+        return [
+            {
+                "plan": str(r.plan),
+                "count": r.count,
+            }
+            for r in result.all()
+        ]
+
+    async def _monthly_tenant_signups(self) -> list[dict]:
+        month_col = func.date_trunc("month", Tenant.created_at)
+        result = await self.db.execute(
+            select(
+                month_col.label("month"),
+                func.count(Tenant.id).label("count"),
+            )
+            .where(Tenant.deleted_at.is_(None))
+            .group_by(month_col)
+            .order_by(month_col)
+            .limit(12)
+        )
+        return [
+            {
+                "month": str(r.month)[:7],
+                "count": r.count,
+            }
+            for r in result.all()
+        ]
+
+    async def _total_users(self) -> int:
+        result = await self.db.execute(
+            select(func.count(OrganizationMember.id))
+            .where(OrganizationMember.deleted_at.is_(None))
+        )
+        return result.scalar_one() or 0
+
+    async def _total_projects(self) -> int:
+        result = await self.db.execute(
+            select(func.count(Project.id))
+            .where(Project.deleted_at.is_(None))
+        )
+        return result.scalar_one() or 0
+
+    async def _total_revenue(self) -> float:
+        result = await self.db.execute(
+            select(func.coalesce(func.sum(Invoice.grand_total), 0))
+            .where(Invoice.deleted_at.is_(None))
+        )
+        return round(result.scalar_one() or 0, 2)
+
+    async def _tenant_user_counts(self) -> list[dict]:
+        result = await self.db.execute(
+            select(
+                Tenant.id.label("tenant_id"),
+                Tenant.name.label("tenant_name"),
+                func.count(OrganizationMember.id).label("user_count"),
+            )
+            .join(OrganizationMember, OrganizationMember.tenant_id == Tenant.id, isouter=True)
+            .where(Tenant.deleted_at.is_(None))
+            .group_by(Tenant.id, Tenant.name)
+            .order_by(func.count(OrganizationMember.id).desc())
+        )
+        return [
+            {
+                "tenant_id": r.tenant_id,
+                "tenant_name": r.tenant_name,
+                "user_count": r.user_count,
+            }
+            for r in result.all()
+        ]
+
+    async def _tenant_project_counts(self) -> list[dict]:
+        result = await self.db.execute(
+            select(
+                Tenant.id.label("tenant_id"),
+                Tenant.name.label("tenant_name"),
+                func.count(Project.id).label("project_count"),
+            )
+            .join(Project, Project.tenant_id == Tenant.id, isouter=True)
+            .where(Tenant.deleted_at.is_(None))
+            .group_by(Tenant.id, Tenant.name)
+            .order_by(func.count(Project.id).desc())
+        )
+        return [
+            {
+                "tenant_id": r.tenant_id,
+                "tenant_name": r.tenant_name,
+                "project_count": r.project_count,
+            }
+            for r in result.all()
+        ]
+
+    async def _recent_tenants(self) -> list[dict]:
+        result = await self.db.execute(
+            select(Tenant)
+            .where(Tenant.deleted_at.is_(None))
+            .order_by(Tenant.created_at.desc())
+            .limit(10)
+        )
+        tenants = result.scalars().all()
+        return [
+            {
+                "id": t.id,
+                "name": t.name,
+                "slug": t.slug,
+                "status": t.status.value if hasattr(t.status, "value") else str(t.status),
+                "plan": t.plan.value if hasattr(t.plan, "value") else str(t.plan),
+                "created_at": str(t.created_at) if t.created_at else None,
+            }
+            for t in tenants
+        ]
+
+    async def _top_tenants_by_revenue(self) -> list[dict]:
+        result = await self.db.execute(
+            select(
+                Tenant.id.label("tenant_id"),
+                Tenant.name.label("tenant_name"),
+                func.coalesce(func.sum(Invoice.grand_total), 0).label("revenue"),
+            )
+            .join(Invoice, Invoice.tenant_id == Tenant.id, isouter=True)
+            .where(and_(
+                Tenant.deleted_at.is_(None),
+                Invoice.deleted_at.is_(None),
+            ))
+            .group_by(Tenant.id, Tenant.name)
+            .order_by(func.coalesce(func.sum(Invoice.grand_total), 0).desc())
+            .limit(10)
+        )
+        return [
+            {
+                "tenant_id": r.tenant_id,
+                "tenant_name": r.tenant_name,
+                "revenue": round(r.revenue, 2),
+            }
+            for r in result.all()
+        ]
