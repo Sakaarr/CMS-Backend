@@ -18,6 +18,10 @@ from src.apps.subcontractors.models import (
     SubcontractorStatus, ContractStatus,
 )
 from src.apps.boq.models import BOQItem
+from src.apps.finance.models import (
+    Invoice, InvoiceLineItem, InvoiceType, InvoiceStatus,
+    Payment, PaymentMethod,
+)
 from src.core.exceptions import (
     NotFoundError, ValidationError, BusinessRuleError, ConflictError,
     ConcurrentModificationError,
@@ -702,10 +706,69 @@ class ProgressService:
         await self.db.flush()
         return cert
 
+    async def _generate_invoice_number(self) -> str:
+        result = await self.db.execute(
+            select(func.count()).select_from(Invoice).where(
+                self._scope(Invoice),
+            )
+        )
+        count = result.scalar_one() + 1
+        return f"SUB-INV-{count:05d}"
+
     async def approve_certificate(self, cert_id: str) -> SubcontractorCertificate:
         cert = await self.get_certificate(cert_id)
         if cert.status != CertificateStatus.SUBMITTED:
             raise ValidationError("Only submitted certificates can be approved")
+
+        # Get contract for subcontractor reference
+        contract = await self._get_contract(cert.contract_id)
+
+        # Create Invoice
+        invoice = Invoice(
+            project_id=cert.project_id,
+            invoice_number=await self._generate_invoice_number(),
+            invoice_type=InvoiceType.SUBCONTRACTOR,
+            status=InvoiceStatus.APPROVED,
+            vendor_id=contract.subcontractor_id,
+            invoice_date=date.today(),
+            period_from=cert.period_start,
+            period_to=cert.period_end,
+            vat_rate=0.0,
+            retention_rate=cert.retention_percentage,
+            subtotal=cert.current_completed_value,
+            taxable_amount=cert.current_completed_value,
+            vat_amount=0.0,
+            retention_amount=cert.retention_amount,
+            discount_amount=cert.deductions,
+            grand_total=cert.net_payable,
+            paid_amount=0.0,
+            balance_due=cert.amount_due,
+            currency="NPR",
+            notes=f"Auto-created from certificate {cert.certificate_number}",
+            tenant_id=self.tenant_id,
+            created_by=self.user_id,
+        )
+        self.db.add(invoice)
+        await self.db.flush()
+
+        # Create InvoiceLineItems from certificate items
+        for item in cert.items:
+            li = InvoiceLineItem(
+                invoice_id=invoice.id,
+                boq_item_id=item.boq_item_id,
+                description=item.description,
+                unit=item.unit,
+                quantity=item.current_qty,
+                unit_rate=item.unit_rate,
+                amount=item.current_amount,
+                sort_order=0,
+                tenant_id=self.tenant_id,
+                created_by=self.user_id,
+            )
+            self.db.add(li)
+
+        # Link certificate to invoice
+        cert.invoice_id = invoice.id
         cert.status = CertificateStatus.APPROVED
         cert.approved_by = self.user_id
         cert.approved_at = datetime.now(timezone.utc)
@@ -714,10 +777,48 @@ class ProgressService:
         await self.db.flush()
         return cert
 
+    async def _generate_payment_number(self) -> str:
+        result = await self.db.execute(
+            select(func.count()).select_from(Payment).where(
+                self._scope(Payment),
+            )
+        )
+        count = result.scalar_one() + 1
+        return f"SUB-PMT-{count:05d}"
+
     async def mark_paid(self, cert_id: str) -> SubcontractorCertificate:
         cert = await self.get_certificate(cert_id)
         if cert.status != CertificateStatus.APPROVED:
             raise ValidationError("Only approved certificates can be marked as paid")
+
+        # Sync linked invoice and create Payment record
+        if cert.invoice_id:
+            inv = await self.db.execute(
+                select(Invoice).where(and_(
+                    Invoice.id == cert.invoice_id,
+                    self._scope(Invoice),
+                ))
+            )
+            invoice = inv.scalar_one_or_none()
+            if invoice:
+                invoice.status = InvoiceStatus.PAID
+                invoice.paid_amount = cert.amount_due
+                invoice.balance_due = 0.0
+
+                # Create Payment record for payment history
+                payment = Payment(
+                    invoice_id=invoice.id,
+                    project_id=cert.project_id,
+                    payment_number=await self._generate_payment_number(),
+                    payment_date=date.today(),
+                    amount=cert.amount_due,
+                    method=PaymentMethod.BANK_TRANSFER,
+                    notes=f"Auto-created from certificate {cert.certificate_number}",
+                    tenant_id=self.tenant_id,
+                    created_by=self.user_id,
+                )
+                self.db.add(payment)
+
         cert.status = CertificateStatus.PAID
         cert.version += 1
         cert.updated_by = self.user_id

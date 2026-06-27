@@ -119,6 +119,7 @@ class SubcontractorCertificateResponse(BaseModel):
     amount_due: float
     approved_by: Optional[str] = None
     approved_at: Optional[datetime] = None
+    invoice_id: Optional[str] = None
     revision_number: int
     parent_id: Optional[str] = None
     remarks: Optional[str] = None
@@ -142,6 +143,7 @@ class SubcontractorCertificateSummary(BaseModel):
     amount_due: float
     retention_amount: float
     deductions: float
+    invoice_id: Optional[str] = None
     revision_number: int
     created_at: Optional[datetime] = None
 

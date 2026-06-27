@@ -14,6 +14,8 @@ from src.apps.subcontractors.schemas import (
     ContractResponse, ContractSummary,
     CreateWorkOrderRequest, UpdateWorkOrderRequest,
     WorkOrderResponse, WorkOrderSummary,
+    AssignBOQItemsRequest, AssignedBOQItemResponse, ContractBOQItemResponse,
+    ProjectSubcontractorResponse,
 )
 from src.shared.response import APIResponse, PaginatedResponse, success_response, paginated_response
 from src.core.dependencies import require_module
@@ -78,6 +80,54 @@ async def update_subcontractor(
 async def delete_subcontractor(subcontractor_id: str, svc: SubcontractorService = Depends(get_svc)):
     await svc.delete(subcontractor_id)
     return success_response(message="Subcontractor deleted")
+
+
+# ── Contract BOQ Item Assignment ───────────────────────────────
+
+@router.get("/contracts/{contract_id}/boq-items", response_model=PaginatedResponse[ContractBOQItemResponse])
+async def list_contract_boq_items(
+    contract_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    svc: SubcontractorService = Depends(get_svc),
+):
+    skip = (page - 1) * page_size
+    items, total = await svc.list_contract_boq_items(
+        contract_id, skip=skip, limit=page_size,
+    )
+    return paginated_response(
+        data=[ContractBOQItemResponse(**i) for i in items],
+        total=total, page=page, page_size=page_size,
+    )
+
+
+@router.post("/contracts/{contract_id}/boq-items", response_model=APIResponse[list], status_code=201)
+async def assign_boq_items(
+    contract_id: str, data: AssignBOQItemsRequest,
+    svc: SubcontractorService = Depends(get_svc),
+):
+    items = await svc.assign_boq_items(contract_id, data.items)
+    return success_response(
+        data=[AssignedBOQItemResponse.model_validate(i) for i in items],
+        message="BOQ items assigned",
+    )
+
+
+@router.get("/projects/{project_id}/subcontractors", response_model=PaginatedResponse[ProjectSubcontractorResponse])
+async def list_project_subcontractors(
+    project_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    svc: SubcontractorService = Depends(get_svc),
+):
+    skip = (page - 1) * page_size
+    items, total = await svc.get_project_subcontractors(
+        project_id, skip=skip, limit=page_size,
+    )
+    return paginated_response(
+        data=[ProjectSubcontractorResponse(**i) for i in items],
+        total=total, page=page, page_size=page_size,
+    )
 
 
 @router.post("/projects/{project_id}/contracts", response_model=APIResponse[ContractResponse], status_code=201)

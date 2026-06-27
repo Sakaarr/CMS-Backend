@@ -4,8 +4,11 @@ from sqlalchemy import select, and_, func, update
 from sqlalchemy.orm import selectinload
 from src.apps.quality.models import (
     Inspection, ChecklistItem, NCR, SafetyIncident,
-    PunchListItem, InspectionStatus, NCRStatus,
+    PunchListItem, ToolboxTalk, SafetyViolation, SafetyObservation,
+    InspectionStatus, NCRStatus,
     IncidentStatus, PunchListStatus, NCRSeverity,
+    ViolationSeverity, ViolationStatus,
+    ObservationType, ObservationStatus, TalkStatus,
 )
 from src.apps.quality.schemas import (
     CreateInspectionRequest, UpdateInspectionRequest, UpdateChecklistItemRequest,
@@ -423,4 +426,92 @@ class QualityService:
             "open_incidents": open_incidents,
             "open_punch_items": open_punch,
             "avg_inspection_score": round(avg_score, 1) if avg_score else 0.0,
+        }
+
+    # ── Safety Metrics ──────────────────────────────────────────────
+
+    async def get_safety_metrics(
+        self, project_id: str, subcontractor_id: str | None = None,
+    ) -> dict:
+        conditions = [self._scope(SafetyIncident), SafetyIncident.project_id == project_id]
+        violation_conditions = [self._scope(SafetyViolation), SafetyViolation.project_id == project_id]
+        obs_conditions = [self._scope(SafetyObservation), SafetyObservation.project_id == project_id]
+        talk_conditions = [self._scope(ToolboxTalk), ToolboxTalk.project_id == project_id]
+
+        if subcontractor_id:
+            conditions.append(SafetyIncident.subcontractor_id == subcontractor_id)
+            violation_conditions.append(SafetyViolation.subcontractor_id == subcontractor_id)
+            obs_conditions.append(SafetyObservation.subcontractor_id == subcontractor_id)
+            talk_conditions.append(ToolboxTalk.subcontractor_id == subcontractor_id)
+
+        total_incidents = (await self.db.execute(
+            select(func.count()).select_from(SafetyIncident).where(and_(*conditions))
+        )).scalar_one()
+
+        open_incidents = (await self.db.execute(
+            select(func.count()).select_from(SafetyIncident).where(and_(
+                *conditions, SafetyIncident.status.in_(["reported", "under_investigation"]),
+            ))
+        )).scalar_one()
+
+        fatal_incidents = (await self.db.execute(
+            select(func.count()).select_from(SafetyIncident).where(and_(
+                *conditions, SafetyIncident.severity == "fatal",
+            ))
+        )).scalar_one()
+
+        total_violations = (await self.db.execute(
+            select(func.count()).select_from(SafetyViolation).where(and_(*violation_conditions))
+        )).scalar_one()
+
+        critical_violations = (await self.db.execute(
+            select(func.count()).select_from(SafetyViolation).where(and_(
+                *violation_conditions, SafetyViolation.severity.in_([ViolationSeverity.HIGH, ViolationSeverity.CRITICAL]),
+            ))
+        )).scalar_one()
+
+        total_observations = (await self.db.execute(
+            select(func.count()).select_from(SafetyObservation).where(and_(*obs_conditions))
+        )).scalar_one()
+
+        positive_observations = (await self.db.execute(
+            select(func.count()).select_from(SafetyObservation).where(and_(
+                *obs_conditions, SafetyObservation.is_positive.is_(True),
+            ))
+        )).scalar_one()
+
+        unsafe_observations = (await self.db.execute(
+            select(func.count()).select_from(SafetyObservation).where(and_(
+                *obs_conditions, SafetyObservation.observation_type == ObservationType.UNSAFE,
+            ))
+        )).scalar_one()
+
+        total_talks = (await self.db.execute(
+            select(func.count()).select_from(ToolboxTalk).where(and_(*talk_conditions))
+        )).scalar_one()
+
+        completed_talks = (await self.db.execute(
+            select(func.count()).select_from(ToolboxTalk).where(and_(
+                *talk_conditions, ToolboxTalk.status == TalkStatus.COMPLETED,
+            ))
+        )).scalar_one()
+
+        total_attendees = (await self.db.execute(
+            select(func.coalesce(func.sum(ToolboxTalk.attendees_count), 0)).where(and_(
+                *talk_conditions, ToolboxTalk.status == TalkStatus.COMPLETED,
+            ))
+        )).scalar_one()
+
+        return {
+            "total_incidents": total_incidents,
+            "open_incidents": open_incidents,
+            "fatal_incidents": fatal_incidents,
+            "total_violations": total_violations,
+            "critical_violations": critical_violations,
+            "total_observations": total_observations,
+            "positive_observations": positive_observations,
+            "unsafe_observations": unsafe_observations,
+            "total_toolbox_talks": total_talks,
+            "completed_toolbox_talks": completed_talks,
+            "total_attendees": total_attendees,
         }

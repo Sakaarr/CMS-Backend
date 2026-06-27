@@ -5,14 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 from sqlalchemy.orm import selectinload
 from src.apps.subcontractors.models import (
-    Subcontractor, SubcontractorContract, WorkOrder,
-    SubcontractorStatus, ContractStatus, WorkOrderStatus,
+    Subcontractor, SubcontractorContract, WorkOrder, SubcontractorBOQItem,
+    SubcontractorStatus, ContractStatus, WorkOrderStatus, BOQItemAssignmentStatus,
 )
 from src.apps.subcontractors.schemas import (
     CreateSubcontractorRequest, UpdateSubcontractorRequest,
     CreateContractRequest, UpdateContractRequest,
     CreateWorkOrderRequest, UpdateWorkOrderRequest,
+    AssignBOQItemRequest,
 )
+from src.apps.boq.models import BOQItem
 from src.core.exceptions import NotFoundError
 import uuid
 
@@ -236,3 +238,148 @@ class SubcontractorService:
         wo.updated_by = self.user_id
         await self.db.flush()
         return wo
+
+    # ── BOQ Item Assignment ─────────────────────────────────────
+
+    async def assign_boq_items(
+        self, contract_id: str, items: list[AssignBOQItemRequest],
+    ) -> list[SubcontractorBOQItem]:
+        contract = await self.get_contract(contract_id)
+        created = []
+        for item in items:
+            boq_item = await self.db.execute(
+                select(BOQItem).where(and_(
+                    BOQItem.id == item.boq_item_id,
+                    BOQItem.deleted_at.is_(None),
+                ))
+            )
+            if not boq_item.scalar_one_or_none():
+                raise NotFoundError(f"BOQ item {item.boq_item_id}")
+
+            assignment = SubcontractorBOQItem(
+                contract_id=contract_id,
+                boq_item_id=item.boq_item_id,
+                assigned_quantity=item.assigned_quantity,
+                unit_rate=item.unit_rate,
+                contract_amount=item.contract_amount,
+                status=BOQItemAssignmentStatus.PENDING,
+                tenant_id=self.tenant_id,
+                created_by=self.user_id,
+            )
+            self.db.add(assignment)
+            created.append(assignment)
+
+        await self.db.flush()
+        return created
+
+    async def list_contract_boq_items(
+        self, contract_id: str, skip: int = 0, limit: int = 30,
+    ) -> tuple[list[dict], int]:
+        contract = await self.get_contract(contract_id)
+
+        total = (await self.db.execute(
+            select(func.count()).select_from(SubcontractorBOQItem).where(and_(
+                SubcontractorBOQItem.contract_id == contract_id,
+                SubcontractorBOQItem.deleted_at.is_(None),
+            ))
+        )).scalar_one()
+
+        rows = await self.db.execute(
+            select(
+                SubcontractorBOQItem,
+                BOQItem.item_number,
+                BOQItem.description,
+                BOQItem.unit,
+                BOQItem.quantity.label("boq_quantity"),
+                BOQItem.unit_rate.label("boq_unit_rate"),
+            )
+            .select_from(SubcontractorBOQItem)
+            .join(BOQItem, BOQItem.id == SubcontractorBOQItem.boq_item_id)
+            .where(and_(
+                SubcontractorBOQItem.contract_id == contract_id,
+                SubcontractorBOQItem.deleted_at.is_(None),
+                BOQItem.deleted_at.is_(None),
+            ))
+            .order_by(BOQItem.item_number.asc())
+            .offset(skip).limit(limit)
+        )
+        result = []
+        for row in rows.all():
+            a = row[0]
+            result.append({
+                "id": a.id,
+                "boq_item_id": a.boq_item_id,
+                "item_number": row[1],
+                "description": row[2],
+                "unit": row[3],
+                "boq_quantity": row[4] or 0,
+                "boq_unit_rate": row[5] or 0,
+                "assigned_quantity": a.assigned_quantity,
+                "unit_rate": a.unit_rate,
+                "contract_amount": a.contract_amount,
+                "status": a.status.value,
+                "notes": a.notes,
+            })
+        return result, total
+
+    # ── Project-level subcontractor summary ──────────────────────
+
+    async def get_project_subcontractors(
+        self, project_id: str, skip: int = 0, limit: int = 30,
+    ) -> tuple[list[dict], int]:
+        conditions = [
+            SubcontractorContract.project_id == project_id,
+            SubcontractorContract.deleted_at.is_(None),
+        ]
+        total = (await self.db.execute(
+            select(func.count()).select_from(SubcontractorContract).where(and_(*conditions))
+        )).scalar_one()
+
+        contracts = await self.db.execute(
+            select(SubcontractorContract)
+            .options(selectinload(SubcontractorContract.subcontractor))
+            .where(and_(*conditions))
+            .order_by(SubcontractorContract.created_at.desc())
+            .offset(skip).limit(limit)
+        )
+        contract_list = contracts.scalars().all()
+
+        result = []
+        for c in contract_list:
+            sub = c.subcontractor
+            if not sub:
+                continue
+
+            boq_count = (await self.db.execute(
+                select(func.count()).select_from(SubcontractorBOQItem).where(and_(
+                    SubcontractorBOQItem.contract_id == c.id,
+                    SubcontractorBOQItem.deleted_at.is_(None),
+                ))
+            )).scalar_one()
+
+            boq_amount = (await self.db.execute(
+                select(func.coalesce(func.sum(SubcontractorBOQItem.contract_amount), 0)).where(and_(
+                    SubcontractorBOQItem.contract_id == c.id,
+                    SubcontractorBOQItem.deleted_at.is_(None),
+                ))
+            )).scalar_one()
+
+            result.append({
+                "contract_id": c.id,
+                "contract_number": c.contract_number,
+                "contract_title": c.title,
+                "contract_status": c.status.value,
+                "contract_value": c.contract_value,
+                "currency": c.currency,
+                "scope_of_work": c.scope_of_work,
+                "start_date": c.start_date,
+                "end_date": c.end_date,
+                "retention_percentage": c.retention_percentage,
+                "subcontractor_id": sub.id,
+                "subcontractor_name": sub.name,
+                "subcontractor_specialty": sub.specialty.value if sub.specialty else "",
+                "boq_items_count": boq_count,
+                "boq_items_total_amount": boq_amount,
+            })
+
+        return result, total
