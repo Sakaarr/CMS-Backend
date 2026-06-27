@@ -59,3 +59,48 @@ class TenantNotFoundError(AppException):
             detail="Tenant not found or inactive",
             error_code="TENANT_NOT_FOUND",
         )
+
+
+class BusinessRuleError(AppException):
+    def __init__(self, detail: str, error_code: str = "BUSINESS_RULE"):
+        super().__init__(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=detail,
+            error_code=error_code,
+        )
+
+
+class DuplicateResourceError(AppException):
+    def __init__(self, detail: str = "Resource already exists"):
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=detail,
+            error_code="DUPLICATE",
+        )
+
+
+class ConcurrentModificationError(AppException):
+    def __init__(self, detail: str = "Resource was modified by another user"):
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=detail,
+            error_code="CONCURRENT_MODIFICATION",
+        )
+
+
+class DependencyError(AppException):
+    def __init__(self, detail: str, error_code: str = "DEPENDENCY"):
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=detail,
+            error_code=error_code,
+        )
+
+
+class QuantityExceededError(AppException):
+    def __init__(self, detail: str):
+        super().__init__(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=detail,
+            error_code="QUANTITY_EXCEEDED",
+        )
