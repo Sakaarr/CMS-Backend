@@ -1,10 +1,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, update
+from sqlalchemy import select, and_, or_, func, update
 from sqlalchemy.orm import selectinload
 from src.apps.projects.models import (
     Project, Site, Milestone, ProjectMember,
     ProjectStatus, SiteStatus, MilestoneStatus
 )
+from src.apps.identity.models import User, OrganizationMember, UserRole
 from src.apps.projects.schemas import (
     CreateProjectRequest, UpdateProjectRequest, ProjectStatusUpdateRequest,
     CreateSiteRequest, UpdateSiteRequest,
@@ -58,6 +59,52 @@ class ProjectService:
             raise NotFoundError("Project")
         return project
 
+    async def _is_project_member(self, project_id: str) -> bool:
+        result = await self.db.execute(
+            select(ProjectMember).where(
+                and_(
+                    ProjectMember.project_id == project_id,
+                    ProjectMember.user_id == self.user_id,
+                    ProjectMember.tenant_id == self.tenant_id,
+                    ProjectMember.deleted_at.is_(None),
+                    ProjectMember.is_active.is_(True),
+                )
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def _require_project_admin(self, project_id: str) -> None:
+        project = await self._get_project_or_404(project_id)
+        if project.project_manager_id == self.user_id:
+            return
+        member_result = await self.db.execute(
+            select(ProjectMember).where(
+                and_(
+                    ProjectMember.project_id == project_id,
+                    ProjectMember.user_id == self.user_id,
+                    ProjectMember.role == UserRole.PROJECT_MANAGER,
+                    ProjectMember.tenant_id == self.tenant_id,
+                    ProjectMember.deleted_at.is_(None),
+                    ProjectMember.is_active.is_(True),
+                )
+            )
+        )
+        if member_result.scalar_one_or_none():
+            return
+        org_result = await self.db.execute(
+            select(OrganizationMember).where(
+                and_(
+                    OrganizationMember.user_id == self.user_id,
+                    OrganizationMember.tenant_id == self.tenant_id,
+                    OrganizationMember.role == UserRole.COMPANY_ADMIN,
+                    OrganizationMember.deleted_at.is_(None),
+                )
+            )
+        )
+        if org_result.scalar_one_or_none():
+            return
+        raise ForbiddenError("Only project manager or company admin can perform this action")
+
     async def _code_exists(self, code: str, exclude_id: str | None = None) -> bool:
         q = select(Project).where(
             and_(
@@ -98,8 +145,29 @@ class ProjectService:
         await self.db.flush()
         return project
 
+    async def _is_company_admin(self) -> bool:
+        result = await self.db.execute(
+            select(OrganizationMember).where(
+                and_(
+                    OrganizationMember.user_id == self.user_id,
+                    OrganizationMember.tenant_id == self.tenant_id,
+                    OrganizationMember.role == UserRole.COMPANY_ADMIN,
+                    OrganizationMember.deleted_at.is_(None),
+                )
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
     async def get_project(self, project_id: str) -> Project:
-        return await self._get_project_or_404(project_id)
+        project = await self._get_project_or_404(project_id)
+        is_member = (
+            project.project_manager_id == self.user_id
+            or await self._is_project_member(project_id)
+            or await self._is_company_admin()
+        )
+        if not is_member:
+            raise ForbiddenError("Access denied: you are not a member of this project")
+        return project
 
     async def list_projects(
         self,
@@ -109,6 +177,14 @@ class ProjectService:
         search: str | None = None,
     ) -> tuple[list[Project], int]:
         conditions = [self._base_query()]
+
+        conditions.append(
+            or_(
+                Project.project_manager_id == self.user_id,
+                Project.members.any(ProjectMember.user_id == self.user_id),
+                await self._is_company_admin(),
+            )
+        )
 
         if status:
             conditions.append(Project.status == status)
@@ -343,7 +419,7 @@ class ProjectService:
     # ── Project Members ───────────────────────────────────────────
 
     async def add_member(self, project_id: str, data: AddProjectMemberRequest) -> ProjectMember:
-        await self._get_project_or_404(project_id)
+        await self._require_project_admin(project_id)
 
         existing = await self.db.execute(
             select(ProjectMember).where(
@@ -351,11 +427,30 @@ class ProjectService:
                     ProjectMember.project_id == project_id,
                     ProjectMember.user_id == data.user_id,
                     ProjectMember.deleted_at.is_(None),
+                    ProjectMember.is_active.is_(True),
                 )
             )
         )
         if existing.scalar_one_or_none():
             raise ConflictError("User is already a member of this project")
+
+        inactive = await self.db.execute(
+            select(ProjectMember).where(
+                and_(
+                    ProjectMember.project_id == project_id,
+                    ProjectMember.user_id == data.user_id,
+                    ProjectMember.deleted_at.is_(None),
+                    ProjectMember.is_active.is_(False),
+                )
+            )
+        )
+        existing_record = inactive.scalar_one_or_none()
+        if existing_record:
+            existing_record.is_active = True
+            existing_record.role = data.role
+            existing_record.updated_by = self.user_id
+            await self.db.flush()
+            return existing_record
 
         member = ProjectMember(
             project_id=project_id,
@@ -368,21 +463,45 @@ class ProjectService:
         await self.db.flush()
         return member
 
-    async def list_members(self, project_id: str) -> list[ProjectMember]:
+    async def list_members(self, project_id: str) -> list[dict]:
         await self._get_project_or_404(project_id)
         result = await self.db.execute(
-            select(ProjectMember).where(
+            select(
+                ProjectMember.id,
+                ProjectMember.project_id,
+                ProjectMember.user_id,
+                ProjectMember.role,
+                ProjectMember.is_active,
+                User.full_name,
+                User.email,
+            )
+            .join(User, ProjectMember.user_id == User.id)
+            .where(
                 and_(
                     ProjectMember.project_id == project_id,
                     ProjectMember.tenant_id == self.tenant_id,
                     ProjectMember.deleted_at.is_(None),
                     ProjectMember.is_active.is_(True),
+                    User.deleted_at.is_(None),
                 )
             )
         )
-        return list(result.scalars().all())
+        rows = result.all()
+        return [
+            {
+                "id": r.id,
+                "project_id": r.project_id,
+                "user_id": r.user_id,
+                "role": r.role,
+                "is_active": r.is_active,
+                "user_name": r.full_name,
+                "user_email": r.email,
+            }
+            for r in rows
+        ]
 
     async def remove_member(self, project_id: str, member_id: str) -> None:
+        await self._require_project_admin(project_id)
         result = await self.db.execute(
             select(ProjectMember).where(
                 and_(

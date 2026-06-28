@@ -157,6 +157,7 @@ class CreateMilestoneRequest(BaseModel):
     planned_date: date | None = None
     sequence: int = 0
     is_critical: bool = False
+    weight: float | None = None
 
 
 class UpdateMilestoneRequest(BaseModel):
@@ -168,6 +169,7 @@ class UpdateMilestoneRequest(BaseModel):
     sequence: int | None = None
     is_critical: bool | None = None
     completion_percentage: float | None = None
+    weight: float | None = None
 
 
 class MilestoneResponse(BaseModel):
@@ -183,6 +185,7 @@ class MilestoneResponse(BaseModel):
     sequence: int
     is_critical: bool
     completion_percentage: float
+    weight: float | None
     created_at: datetime
     updated_at: datetime
 
@@ -202,6 +205,8 @@ class ProjectMemberResponse(BaseModel):
     user_id: str
     role: UserRole
     is_active: bool
+    user_name: str | None = None
+    user_email: str | None = None
 
     model_config = {"from_attributes": True}
 

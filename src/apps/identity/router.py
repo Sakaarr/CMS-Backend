@@ -202,9 +202,37 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    acting_user, tenant_id, _ = await _require_admin(current_user, db, request)
+    from sqlalchemy import select, and_
+    from src.apps.tenancy.models import Tenant
+    from src.apps.identity.models import OrganizationMember
+
+    tenant_slug = getattr(request.state, "tenant_slug", None)
+    if not tenant_slug:
+        raise ForbiddenError("Tenant slug required in X-Tenant-Slug header")
+
+    tenant_result = await db.execute(
+        select(Tenant).where(
+            and_(Tenant.slug == tenant_slug, Tenant.deleted_at.is_(None))
+        )
+    )
+    tenant = tenant_result.scalar_one_or_none()
+    if not tenant:
+        raise ForbiddenError("Tenant not found")
+
+    member_result = await db.execute(
+        select(OrganizationMember).where(
+            and_(
+                OrganizationMember.user_id == current_user.id,
+                OrganizationMember.tenant_id == tenant.id,
+                OrganizationMember.deleted_at.is_(None),
+            )
+        )
+    )
+    if not member_result.scalar_one_or_none():
+        raise ForbiddenError("Access denied: not a member of this organization")
+
     svc = UserManagementService(
-        db=db, tenant_id=tenant_id, acting_user_id=acting_user.id
+        db=db, tenant_id=tenant.id, acting_user_id=current_user.id
     )
     users = await svc.list_users()
     return success_response(

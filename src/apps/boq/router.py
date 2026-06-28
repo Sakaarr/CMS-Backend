@@ -95,6 +95,17 @@ async def approve_budget_version(version_id: str, svc: BOQService = Depends(get_
     return success_response(data=BudgetVersionResponse.model_validate(bv), message="Budget approved")
 
 
+@router.post("/budget-versions/{version_id}/copy", response_model=APIResponse[BudgetVersionResponse])
+async def copy_budget_version(
+    version_id: str,
+    name: str | None = None,
+    contingency_percentage: float | None = None,
+    svc: BOQService = Depends(get_boq_service),
+):
+    bv = await svc.copy_budget_version(version_id, name=name, contingency_percentage=contingency_percentage)
+    return success_response(data=BudgetVersionResponse.model_validate(bv), message="Budget version copied")
+
+
 @router.get("/budget-versions/{version_id}/summary", response_model=APIResponse[dict])
 async def get_boq_summary(version_id: str, svc: BOQService = Depends(get_boq_service)):
     summary = await svc.get_boq_summary(version_id)
