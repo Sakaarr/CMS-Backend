@@ -34,9 +34,11 @@ async def _resolve_permissions(
     request: Request,
     current_user: User,
     db: AsyncSession,
-) -> tuple[str, UserPermissionSchema]:
+) -> tuple[str | None, UserPermissionSchema | None]:
     tenant_slug = getattr(request.state, "tenant_slug", None)
     if not tenant_slug:
+        if current_user.is_superadmin:
+            return None, None
         raise TenantNotFoundError()
 
     tenant = await TenantService(db).get_by_slug(tenant_slug)
@@ -85,6 +87,13 @@ async def get_inbox(
     limit: int = Query(100, ge=1, le=500),
 ):
     tenant_id, perms = await _resolve_permissions(request, current_user, db)
+
+    # Superadmin without tenant context → empty inbox
+    if not tenant_id or not perms:
+        empty = ApprovalInboxResponse(
+            items=[], total=0, counts={},
+        )
+        return success_response(data=empty.model_dump())
 
     allowed_modules: set[str] = set()
     if perms.can_finance:
