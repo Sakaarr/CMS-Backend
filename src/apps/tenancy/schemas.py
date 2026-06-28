@@ -14,6 +14,7 @@ class CreateTenantRequest(BaseModel):
     timezone: str = "Asia/Kathmandu"
     pan_number: str | None = None
     vat_number: str | None = None
+    plan: SubscriptionPlan = SubscriptionPlan.FREE
 
     @field_validator("slug")
     @classmethod
@@ -35,6 +36,8 @@ class UpdateTenantRequest(BaseModel):
     vat_number: str | None = None
     logo_url: str | None = None
     primary_color: str | None = None
+    plan: SubscriptionPlan | None = None
+    status: TenantStatus | None = None
 
 
 class TenantResponse(BaseModel):

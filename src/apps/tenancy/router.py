@@ -33,6 +33,7 @@ class CreateTenantWithAdminRequest(BaseModel):
     timezone: str = "Asia/Kathmandu"
     pan_number: str | None = None
     vat_number: str | None = None
+    plan: str = "free"
 
     # Admin user fields
     admin_full_name: str
@@ -71,11 +72,17 @@ async def create_tenant(
     Super admin creates a new tenant.
     Also creates the tenant's company admin user and emails their credentials.
     """
-    from src.apps.tenancy.schemas import CreateTenantRequest
+    from src.apps.tenancy.schemas import CreateTenantRequest, SubscriptionPlan
     from src.apps.identity.service import UserManagementService
     from src.apps.identity.schemas import CreateTenantAdminRequest
 
     tenant_service = TenantService(db)
+
+    # Resolve plan
+    try:
+        plan = SubscriptionPlan(data.plan.lower())
+    except ValueError:
+        plan = SubscriptionPlan.FREE
 
     # Step 1: Create tenant
     tenant_data = CreateTenantRequest(
@@ -89,6 +96,7 @@ async def create_tenant(
         timezone=data.timezone,
         pan_number=data.pan_number,
         vat_number=data.vat_number,
+        plan=plan,
     )
     tenant = await tenant_service.create(tenant_data, created_by=current_user.id)
 
@@ -137,58 +145,7 @@ async def list_tenants(
     )
 
 
-@router.get("/{tenant_id}", response_model=APIResponse[TenantResponse])
-async def get_tenant(
-    tenant_id: str,
-    current_user: SuperAdmin,
-    db: AsyncSession = Depends(get_db),
-):
-    service = TenantService(db)
-    tenant = await service.get_by_id(tenant_id)
-    return success_response(data=TenantResponse.model_validate(tenant))
-
-
-@router.patch("/{tenant_id}", response_model=APIResponse[TenantResponse])
-async def update_tenant(
-    tenant_id: str,
-    data: UpdateTenantRequest,
-    current_user: SuperAdmin,
-    db: AsyncSession = Depends(get_db),
-):
-    service = TenantService(db)
-    tenant = await service.update(tenant_id, data)
-    return success_response(
-        data=TenantResponse.model_validate(tenant),
-        message="Tenant updated",
-    )
-
-
-@router.post("/{tenant_id}/suspend", response_model=APIResponse[TenantResponse])
-async def suspend_tenant(
-    tenant_id: str,
-    current_user: SuperAdmin,
-    db: AsyncSession = Depends(get_db),
-):
-    service = TenantService(db)
-    tenant = await service.suspend(tenant_id)
-    return success_response(
-        data=TenantResponse.model_validate(tenant),
-        message="Tenant suspended",
-    )
-
-
-@router.post("/{tenant_id}/activate", response_model=APIResponse[TenantResponse])
-async def activate_tenant(
-    tenant_id: str,
-    current_user: SuperAdmin,
-    db: AsyncSession = Depends(get_db),
-):
-    service = TenantService(db)
-    tenant = await service.activate(tenant_id)
-    return success_response(
-        data=TenantResponse.model_validate(tenant),
-        message="Tenant activated",
-    )
+# ── "My" routes (must come BEFORE /{tenant_id} to avoid path conflict) ──
 
 @router.get("/my/branding", response_model=APIResponse[TenantBrandingResponse])
 async def get_my_branding(
@@ -229,7 +186,6 @@ async def upload_logo(
     service = TenantService(db)
     tenant = await service.get_by_slug(tenant_slug)
 
-    # Only company_admin or superadmin
     if not current_user.is_superadmin:
         member_result = await db.execute(
             select(OrganizationMember).where(
@@ -302,4 +258,60 @@ async def update_colors(
     return success_response(
         data=TenantBrandingResponse.model_validate(tenant),
         message="Brand colors updated",
+    )
+
+
+# ── Tenant CRUD (must come AFTER /my/* routes) ───────────────────
+
+@router.get("/{tenant_id}", response_model=APIResponse[TenantResponse])
+async def get_tenant(
+    tenant_id: str,
+    current_user: SuperAdmin,
+    db: AsyncSession = Depends(get_db),
+):
+    service = TenantService(db)
+    tenant = await service.get_by_id(tenant_id)
+    return success_response(data=TenantResponse.model_validate(tenant))
+
+
+@router.patch("/{tenant_id}", response_model=APIResponse[TenantResponse])
+async def update_tenant(
+    tenant_id: str,
+    data: UpdateTenantRequest,
+    current_user: SuperAdmin,
+    db: AsyncSession = Depends(get_db),
+):
+    service = TenantService(db)
+    tenant = await service.update(tenant_id, data)
+    return success_response(
+        data=TenantResponse.model_validate(tenant),
+        message="Tenant updated",
+    )
+
+
+@router.post("/{tenant_id}/suspend", response_model=APIResponse[TenantResponse])
+async def suspend_tenant(
+    tenant_id: str,
+    current_user: SuperAdmin,
+    db: AsyncSession = Depends(get_db),
+):
+    service = TenantService(db)
+    tenant = await service.suspend(tenant_id)
+    return success_response(
+        data=TenantResponse.model_validate(tenant),
+        message="Tenant suspended",
+    )
+
+
+@router.post("/{tenant_id}/activate", response_model=APIResponse[TenantResponse])
+async def activate_tenant(
+    tenant_id: str,
+    current_user: SuperAdmin,
+    db: AsyncSession = Depends(get_db),
+):
+    service = TenantService(db)
+    tenant = await service.activate(tenant_id)
+    return success_response(
+        data=TenantResponse.model_validate(tenant),
+        message="Tenant activated",
     )
