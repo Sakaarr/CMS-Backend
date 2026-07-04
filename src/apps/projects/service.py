@@ -1,3 +1,4 @@
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func, update
 from sqlalchemy.orm import selectinload
@@ -15,6 +16,10 @@ from src.apps.projects.schemas import (
 from src.core.exceptions import (
     NotFoundError, ConflictError, ValidationError, ForbiddenError
 )
+from src.core.email import send_email
+from src.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ── Valid project status transitions ─────────────────────────────
@@ -27,6 +32,57 @@ STATUS_TRANSITIONS: dict[ProjectStatus, list[ProjectStatus]] = {
     ProjectStatus.COMPLETED: [],
     ProjectStatus.CANCELLED: [],
 }
+
+
+def _build_status_change_html(
+    user_name: str,
+    project_name: str,
+    project_code: str,
+    old_status: str,
+    new_status: str,
+    reason: str | None = None,
+    project_url: str | None = None,
+) -> str:
+    rows = f"""
+    <tr><td style="padding:4px 0;color:#6b7280;width:140px;">Project</td>
+        <td style="padding:4px 0;font-weight:600;color:#111827;">{project_name} ({project_code})</td></tr>
+    <tr><td style="padding:4px 0;color:#6b7280;">Old Status</td>
+        <td style="padding:4px 0;color:#111827;">{old_status.replace('_', ' ').title()}</td></tr>
+    <tr><td style="padding:4px 0;color:#6b7280;">New Status</td>
+        <td style="padding:4px 0;color:#111827;">{new_status.replace('_', ' ').title()}</td></tr>
+    """
+    if reason:
+        rows += f'<tr><td style="padding:4px 0;color:#6b7280;">Reason</td><td style="padding:4px 0;color:#111827;">{reason}</td></tr>'
+
+    action_html = ""
+    if project_url:
+        action_html = f'<p style="text-align:center;margin-top:24px;"><a href="{project_url}" style="display:inline-block;background:#2563eb;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;">View Project →</a></p>'
+
+    return f"""<!DOCTYPE html>
+<html>
+<head><style>
+body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #111827; }}
+.header {{ background: #2563eb; padding: 24px; border-radius: 12px 12px 0 0; text-align: center; }}
+.header h1 {{ color: white; margin: 0; font-size: 22px; }}
+.header p {{ color: #bfdbfe; margin: 8px 0 0; }}
+.body {{ background: #fff; border: 1px solid #e5e7eb; border-top: none; padding: 32px; border-radius: 0 0 12px 12px; }}
+.meta {{ background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 24px 0; }}
+.meta table {{ width: 100%; border-collapse: collapse; }}
+.meta td {{ padding: 4px 0; }}
+.meta td:first-child {{ color: #6b7280; width: 140px; }}
+.meta td:last-child {{ color: #111827; font-weight: 600; }}
+</style></head>
+<body>
+<div class="header"><h1>CMS Platform</h1><p>Construction Management System</p></div>
+<div class="body">
+  <h2>Hello {user_name},</h2>
+  <p style="color:#374151;line-height:1.6;">
+    The status of project <strong>{project_name}</strong> has been updated.
+  </p>
+  <div class="meta"><table>{rows}</table></div>
+  {action_html}
+</div>
+</body></html>"""
 
 
 class ProjectService:
@@ -224,6 +280,7 @@ class ProjectService:
         self, project_id: str, data: ProjectStatusUpdateRequest
     ) -> Project:
         project = await self._get_project_or_404(project_id)
+        old_status = project.status
         allowed = STATUS_TRANSITIONS.get(project.status, [])
 
         if data.status not in allowed:
@@ -244,7 +301,53 @@ class ProjectService:
             project.actual_end_date = date.today()
 
         await self.db.flush()
+
+        # Notify all active project members about the status change
+        try:
+            await self._notify_project_members(
+                project=project,
+                old_status=old_status,
+                reason=data.reason,
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify project members: {e}")
+
         return project
+
+    async def _notify_project_members(
+        self, project: Project, old_status: ProjectStatus, reason: str | None = None,
+    ) -> None:
+        """Send email notification to all active project members about status change."""
+        result = await self.db.execute(
+            select(User)
+            .join(ProjectMember, ProjectMember.user_id == User.id)
+            .where(and_(
+                ProjectMember.project_id == project.id,
+                ProjectMember.tenant_id == self.tenant_id,
+                ProjectMember.deleted_at.is_(None),
+                ProjectMember.is_active.is_(True),
+                User.is_active.is_(True),
+                User.deleted_at.is_(None),
+            ))
+        )
+        members = result.scalars().all()
+        if not members:
+            return
+
+        project_url = f"{settings.dashboard_url.rstrip('/')}/projects/{project.id}"
+        subject = f"[CMS] Project '{project.name}' status changed to {project.status.value}"
+
+        for user in members:
+            html = _build_status_change_html(
+                user_name=user.full_name,
+                project_name=project.name,
+                project_code=project.code,
+                old_status=old_status.value,
+                new_status=project.status.value,
+                reason=reason,
+                project_url=project_url,
+            )
+            send_email(user.email, subject, html)
 
     async def delete_project(self, project_id: str) -> None:
         project = await self._get_project_or_404(project_id)
