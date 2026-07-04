@@ -79,7 +79,6 @@ class SubcontractorSummary(BaseModel):
 
 
 class CreateContractRequest(BaseModel):
-    project_id: str
     subcontractor_id: str
     title: str
     description: str | None = None

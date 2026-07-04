@@ -137,6 +137,7 @@ class Milestone(TenantScopedModel):
     sequence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_critical: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     completion_percentage: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    weight: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="milestones")

@@ -1,10 +1,12 @@
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, update
+from sqlalchemy import select, and_, or_, func, update
 from sqlalchemy.orm import selectinload
 from src.apps.projects.models import (
     Project, Site, Milestone, ProjectMember,
     ProjectStatus, SiteStatus, MilestoneStatus
 )
+from src.apps.identity.models import User, OrganizationMember, UserRole
 from src.apps.projects.schemas import (
     CreateProjectRequest, UpdateProjectRequest, ProjectStatusUpdateRequest,
     CreateSiteRequest, UpdateSiteRequest,
@@ -14,6 +16,10 @@ from src.apps.projects.schemas import (
 from src.core.exceptions import (
     NotFoundError, ConflictError, ValidationError, ForbiddenError
 )
+from src.core.email import send_email
+from src.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ── Valid project status transitions ─────────────────────────────
@@ -26,6 +32,57 @@ STATUS_TRANSITIONS: dict[ProjectStatus, list[ProjectStatus]] = {
     ProjectStatus.COMPLETED: [],
     ProjectStatus.CANCELLED: [],
 }
+
+
+def _build_status_change_html(
+    user_name: str,
+    project_name: str,
+    project_code: str,
+    old_status: str,
+    new_status: str,
+    reason: str | None = None,
+    project_url: str | None = None,
+) -> str:
+    rows = f"""
+    <tr><td style="padding:4px 0;color:#6b7280;width:140px;">Project</td>
+        <td style="padding:4px 0;font-weight:600;color:#111827;">{project_name} ({project_code})</td></tr>
+    <tr><td style="padding:4px 0;color:#6b7280;">Old Status</td>
+        <td style="padding:4px 0;color:#111827;">{old_status.replace('_', ' ').title()}</td></tr>
+    <tr><td style="padding:4px 0;color:#6b7280;">New Status</td>
+        <td style="padding:4px 0;color:#111827;">{new_status.replace('_', ' ').title()}</td></tr>
+    """
+    if reason:
+        rows += f'<tr><td style="padding:4px 0;color:#6b7280;">Reason</td><td style="padding:4px 0;color:#111827;">{reason}</td></tr>'
+
+    action_html = ""
+    if project_url:
+        action_html = f'<p style="text-align:center;margin-top:24px;"><a href="{project_url}" style="display:inline-block;background:#2563eb;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;">View Project →</a></p>'
+
+    return f"""<!DOCTYPE html>
+<html>
+<head><style>
+body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #111827; }}
+.header {{ background: #2563eb; padding: 24px; border-radius: 12px 12px 0 0; text-align: center; }}
+.header h1 {{ color: white; margin: 0; font-size: 22px; }}
+.header p {{ color: #bfdbfe; margin: 8px 0 0; }}
+.body {{ background: #fff; border: 1px solid #e5e7eb; border-top: none; padding: 32px; border-radius: 0 0 12px 12px; }}
+.meta {{ background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 24px 0; }}
+.meta table {{ width: 100%; border-collapse: collapse; }}
+.meta td {{ padding: 4px 0; }}
+.meta td:first-child {{ color: #6b7280; width: 140px; }}
+.meta td:last-child {{ color: #111827; font-weight: 600; }}
+</style></head>
+<body>
+<div class="header"><h1>CMS Platform</h1><p>Construction Management System</p></div>
+<div class="body">
+  <h2>Hello {user_name},</h2>
+  <p style="color:#374151;line-height:1.6;">
+    The status of project <strong>{project_name}</strong> has been updated.
+  </p>
+  <div class="meta"><table>{rows}</table></div>
+  {action_html}
+</div>
+</body></html>"""
 
 
 class ProjectService:
@@ -57,6 +114,52 @@ class ProjectService:
         if not project:
             raise NotFoundError("Project")
         return project
+
+    async def _is_project_member(self, project_id: str) -> bool:
+        result = await self.db.execute(
+            select(ProjectMember).where(
+                and_(
+                    ProjectMember.project_id == project_id,
+                    ProjectMember.user_id == self.user_id,
+                    ProjectMember.tenant_id == self.tenant_id,
+                    ProjectMember.deleted_at.is_(None),
+                    ProjectMember.is_active.is_(True),
+                )
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def _require_project_admin(self, project_id: str) -> None:
+        project = await self._get_project_or_404(project_id)
+        if project.project_manager_id == self.user_id:
+            return
+        member_result = await self.db.execute(
+            select(ProjectMember).where(
+                and_(
+                    ProjectMember.project_id == project_id,
+                    ProjectMember.user_id == self.user_id,
+                    ProjectMember.role == UserRole.PROJECT_MANAGER,
+                    ProjectMember.tenant_id == self.tenant_id,
+                    ProjectMember.deleted_at.is_(None),
+                    ProjectMember.is_active.is_(True),
+                )
+            )
+        )
+        if member_result.scalar_one_or_none():
+            return
+        org_result = await self.db.execute(
+            select(OrganizationMember).where(
+                and_(
+                    OrganizationMember.user_id == self.user_id,
+                    OrganizationMember.tenant_id == self.tenant_id,
+                    OrganizationMember.role == UserRole.COMPANY_ADMIN,
+                    OrganizationMember.deleted_at.is_(None),
+                )
+            )
+        )
+        if org_result.scalar_one_or_none():
+            return
+        raise ForbiddenError("Only project manager or company admin can perform this action")
 
     async def _code_exists(self, code: str, exclude_id: str | None = None) -> bool:
         q = select(Project).where(
@@ -98,8 +201,29 @@ class ProjectService:
         await self.db.flush()
         return project
 
+    async def _is_company_admin(self) -> bool:
+        result = await self.db.execute(
+            select(OrganizationMember).where(
+                and_(
+                    OrganizationMember.user_id == self.user_id,
+                    OrganizationMember.tenant_id == self.tenant_id,
+                    OrganizationMember.role == UserRole.COMPANY_ADMIN,
+                    OrganizationMember.deleted_at.is_(None),
+                )
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
     async def get_project(self, project_id: str) -> Project:
-        return await self._get_project_or_404(project_id)
+        project = await self._get_project_or_404(project_id)
+        is_member = (
+            project.project_manager_id == self.user_id
+            or await self._is_project_member(project_id)
+            or await self._is_company_admin()
+        )
+        if not is_member:
+            raise ForbiddenError("Access denied: you are not a member of this project")
+        return project
 
     async def list_projects(
         self,
@@ -109,6 +233,14 @@ class ProjectService:
         search: str | None = None,
     ) -> tuple[list[Project], int]:
         conditions = [self._base_query()]
+
+        conditions.append(
+            or_(
+                Project.project_manager_id == self.user_id,
+                Project.members.any(ProjectMember.user_id == self.user_id),
+                await self._is_company_admin(),
+            )
+        )
 
         if status:
             conditions.append(Project.status == status)
@@ -148,6 +280,7 @@ class ProjectService:
         self, project_id: str, data: ProjectStatusUpdateRequest
     ) -> Project:
         project = await self._get_project_or_404(project_id)
+        old_status = project.status
         allowed = STATUS_TRANSITIONS.get(project.status, [])
 
         if data.status not in allowed:
@@ -168,7 +301,53 @@ class ProjectService:
             project.actual_end_date = date.today()
 
         await self.db.flush()
+
+        # Notify all active project members about the status change
+        try:
+            await self._notify_project_members(
+                project=project,
+                old_status=old_status,
+                reason=data.reason,
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify project members: {e}")
+
         return project
+
+    async def _notify_project_members(
+        self, project: Project, old_status: ProjectStatus, reason: str | None = None,
+    ) -> None:
+        """Send email notification to all active project members about status change."""
+        result = await self.db.execute(
+            select(User)
+            .join(ProjectMember, ProjectMember.user_id == User.id)
+            .where(and_(
+                ProjectMember.project_id == project.id,
+                ProjectMember.tenant_id == self.tenant_id,
+                ProjectMember.deleted_at.is_(None),
+                ProjectMember.is_active.is_(True),
+                User.is_active.is_(True),
+                User.deleted_at.is_(None),
+            ))
+        )
+        members = result.scalars().all()
+        if not members:
+            return
+
+        project_url = f"{settings.dashboard_url.rstrip('/')}/projects/{project.id}"
+        subject = f"[CMS] Project '{project.name}' status changed to {project.status.value}"
+
+        for user in members:
+            html = _build_status_change_html(
+                user_name=user.full_name,
+                project_name=project.name,
+                project_code=project.code,
+                old_status=old_status.value,
+                new_status=project.status.value,
+                reason=reason,
+                project_url=project_url,
+            )
+            send_email(user.email, subject, html)
 
     async def delete_project(self, project_id: str) -> None:
         project = await self._get_project_or_404(project_id)
@@ -343,7 +522,7 @@ class ProjectService:
     # ── Project Members ───────────────────────────────────────────
 
     async def add_member(self, project_id: str, data: AddProjectMemberRequest) -> ProjectMember:
-        await self._get_project_or_404(project_id)
+        await self._require_project_admin(project_id)
 
         existing = await self.db.execute(
             select(ProjectMember).where(
@@ -351,11 +530,30 @@ class ProjectService:
                     ProjectMember.project_id == project_id,
                     ProjectMember.user_id == data.user_id,
                     ProjectMember.deleted_at.is_(None),
+                    ProjectMember.is_active.is_(True),
                 )
             )
         )
         if existing.scalar_one_or_none():
             raise ConflictError("User is already a member of this project")
+
+        inactive = await self.db.execute(
+            select(ProjectMember).where(
+                and_(
+                    ProjectMember.project_id == project_id,
+                    ProjectMember.user_id == data.user_id,
+                    ProjectMember.deleted_at.is_(None),
+                    ProjectMember.is_active.is_(False),
+                )
+            )
+        )
+        existing_record = inactive.scalar_one_or_none()
+        if existing_record:
+            existing_record.is_active = True
+            existing_record.role = data.role
+            existing_record.updated_by = self.user_id
+            await self.db.flush()
+            return existing_record
 
         member = ProjectMember(
             project_id=project_id,
@@ -368,21 +566,45 @@ class ProjectService:
         await self.db.flush()
         return member
 
-    async def list_members(self, project_id: str) -> list[ProjectMember]:
+    async def list_members(self, project_id: str) -> list[dict]:
         await self._get_project_or_404(project_id)
         result = await self.db.execute(
-            select(ProjectMember).where(
+            select(
+                ProjectMember.id,
+                ProjectMember.project_id,
+                ProjectMember.user_id,
+                ProjectMember.role,
+                ProjectMember.is_active,
+                User.full_name,
+                User.email,
+            )
+            .join(User, ProjectMember.user_id == User.id)
+            .where(
                 and_(
                     ProjectMember.project_id == project_id,
                     ProjectMember.tenant_id == self.tenant_id,
                     ProjectMember.deleted_at.is_(None),
                     ProjectMember.is_active.is_(True),
+                    User.deleted_at.is_(None),
                 )
             )
         )
-        return list(result.scalars().all())
+        rows = result.all()
+        return [
+            {
+                "id": r.id,
+                "project_id": r.project_id,
+                "user_id": r.user_id,
+                "role": r.role,
+                "is_active": r.is_active,
+                "user_name": r.full_name,
+                "user_email": r.email,
+            }
+            for r in rows
+        ]
 
     async def remove_member(self, project_id: str, member_id: str) -> None:
+        await self._require_project_admin(project_id)
         result = await self.db.execute(
             select(ProjectMember).where(
                 and_(

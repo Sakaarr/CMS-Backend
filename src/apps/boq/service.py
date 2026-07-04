@@ -129,6 +129,76 @@ class BOQService:
         await self.db.flush()
         return bv
 
+    async def copy_budget_version(
+        self, version_id: str, name: str | None = None,
+        contingency_percentage: float | None = None,
+    ) -> BudgetVersion:
+        source = await self.get_budget_version(version_id)
+        items_result = await self.db.execute(
+            select(BOQItem).where(and_(
+                BOQItem.budget_version_id == version_id,
+                BOQItem.tenant_id == self.tenant_id,
+                BOQItem.deleted_at.is_(None),
+            ))
+        )
+        source_items = list(items_result.scalars().all())
+
+        last_result = await self.db.execute(
+            select(func.max(BudgetVersion.version_number)).where(
+                and_(
+                    BudgetVersion.project_id == source.project_id,
+                    BudgetVersion.tenant_id == self.tenant_id,
+                    BudgetVersion.deleted_at.is_(None),
+                )
+            )
+        )
+        last = last_result.scalar_one_or_none() or 0
+
+        new_bv = BudgetVersion(
+            project_id=source.project_id,
+            version_number=last + 1,
+            name=name or f"Copy of {source.name}",
+            description=source.description,
+            status=BudgetVersionStatus.DRAFT,
+            contingency_percentage=contingency_percentage or source.contingency_percentage,
+            currency=source.currency,
+            tenant_id=self.tenant_id,
+            created_by=self.user_id,
+        )
+        self.db.add(new_bv)
+        await self.db.flush()
+
+        for item in source_items:
+            new_item = BOQItem(
+                budget_version_id=new_bv.id,
+                project_id=item.project_id,
+                cost_code_id=item.cost_code_id,
+                parent_id=None,
+                item_number=item.item_number,
+                description=item.description,
+                specification=item.specification,
+                unit=item.unit,
+                quantity=item.quantity,
+                unit_rate=item.unit_rate,
+                amount=item.amount,
+                material_rate=item.material_rate,
+                labour_rate=item.labour_rate,
+                equipment_rate=item.equipment_rate,
+                overhead_rate=item.overhead_rate,
+                status=BOQItemStatus.DRAFT,
+                is_section_header=item.is_section_header,
+                sort_order=item.sort_order,
+                tenant_id=self.tenant_id,
+                created_by=self.user_id,
+                actual_quantity=0.0,
+                actual_amount=0.0,
+            )
+            self.db.add(new_item)
+
+        await self.db.flush()
+        await self._recalculate_version_totals(new_bv.id)
+        return new_bv
+
     async def get_budget_version(self, version_id: str) -> BudgetVersion:
         result = await self.db.execute(
             select(BudgetVersion).where(
